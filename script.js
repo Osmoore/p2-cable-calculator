@@ -71,10 +71,15 @@ const cases = [
   { name: "Case 6", length: 200, current: 15, csa: 16,  supply: "single", voltage: 230, circuit: "power" },
 ];
 
+let rows = "";
+
 for (const run of cases) {
   const resistance = calculateConductorResistance(RHO_COPPER, run.length, run.csa);
   const volts = calculateVoltageDrop(getPhaseFactor(run.supply), resistance, run.current);
   const percent = calculateDropPercent(volts, run.voltage);
   const result = evaluateVerdict(percent, getDropLimit(run.circuit));
   console.log(`${run.name}: ${volts.toFixed(2)} V | ${percent.toFixed(2)} % | ${result}`);
+  rows += `<tr><td>${run.name}</td><td>${volts.toFixed(2)}</td><td>${percent.toFixed(2)}</td><td>${result}</td></tr>`;
 }
+
+document.getElementById("results").innerHTML = rows;
