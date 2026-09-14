@@ -2,7 +2,6 @@
 
 ## What this is
 
-A voltage-drop and cable-cost calculator. Plain HTML, CSS and JavaScript.
 No framework, no server, no database. Osmoore learning project 2.
 
 ## Commands
