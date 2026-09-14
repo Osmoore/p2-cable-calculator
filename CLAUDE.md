@@ -97,9 +97,21 @@ can carry. The calculator does not know that. See Known limitations.
 - Live USD→GHS cable pricing, API key kept off the browser
 - Tabulated mV/A/m method as a cross-check
 
-## Open decision
+## Naming — resolved 14 Sep 2026
 
-The Rules section says function names are verbNoun. The code currently uses
-`voltageDrop`, `dropPercent`, `conductorResistance` — noun phrases, not
-verbNoun. Either rename them (`calculateVoltageDrop`, `calculateDropPercent`,
-`calculateConductorResistance`) or change the rule. Resolve before P3.
+The verbNoun rule stands. All functions renamed to match it.
+
+| Old | New | Why that verb |
+|---|---|---|
+| `conductorResistance` | `calculateConductorResistance` | does real arithmetic |
+| `voltageDrop` | `calculateVoltageDrop` | does real arithmetic |
+| `dropPercent` | `calculateDropPercent` | does real arithmetic |
+| `phaseFactor` | `getPhaseFactor` | looks up a constant, cheap |
+| `dropLimit` | `getDropLimit` | looks up a constant, cheap |
+| `verdict` | `evaluateVerdict` | applies a rule and judges |
+
+`get` vs `calculate` is not decoration. `get` tells a reader the function is a
+lookup with nothing to go wrong inside it; `calculate` warns there is real work
+worth checking. Functions returning true or false are the exception and read as
+a question: `isValidCsa`, `hasThreePhaseSupply`. Event handlers read as
+`handleCalculateClick`.
