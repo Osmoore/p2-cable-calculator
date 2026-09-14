@@ -68,6 +68,7 @@ const cases = [
   { name: "Case 3", length: 70,  current: 32, csa: 2.5, supply: "single", voltage: 230, circuit: "lighting" },
   { name: "Case 4", length: 100, current: 20, csa: 10,  supply: "three",  voltage: 415, circuit: "power" },
   { name: "Case 5", length: 150, current: 10, csa: 10,  supply: "three",  voltage: 415, circuit: "power" },
+  { name: "Case 6", length: 200, current: 15, csa: 16,  supply: "single", voltage: 230, circuit: "power" },
 ];
 
 for (const run of cases) {

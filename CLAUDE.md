@@ -85,6 +85,7 @@ baseline: after any change to the maths, re-run all five.
 | 3 | 0.018 | 70 | 32 | 2.5 | single | 230 | 32.26 | 14.02 | lighting | FAIL |
 | 4 | 0.018 | 100 | 20 | 10 | three | 415 | 6.24 | 1.50 | power | PASS |
 | 5 | 0.018 | 150 | 10 | 10 | three | 415 | 4.68 | 1.13 | power | PASS |
+| 6 | 0.018 | 200| 15 | 16 | single | 230 | __ | __ | power | PASS |
 
 Case 3 also fails on current-carrying capacity — 32 A is beyond what 2.5 mm²
 can carry. The calculator does not know that. See Known limitations.
