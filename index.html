@@ -8,6 +8,44 @@
     <body>
         <h1>Cable Calculator</h1>
 
+        <!-- Input form. Everything the calculator needs for one cable run.
+             "id" on each control is the label JavaScript uses to find it.
+             This must sit ABOVE the <script> tag: the script runs the moment
+             the browser reaches it, and can only find elements already read. -->
+        <form id="run-form">
+
+            <!-- type="text", not type="number", on purpose: type="number"
+                 would silently block bad input, and we want our own validation
+                 to catch it so the rules live in one place we control. -->
+            <label>Length (m) <input type="text" id="length"></label>
+            <label>Current (A) <input type="text" id="current"></label>
+            <label>CSA (mm²) <input type="text" id="csa"></label>
+
+            <!-- The value="..." strings are exactly what getPhaseFactor()
+                 accepts, so nothing has to be translated in between. -->
+            <label>Supply
+                <select id="supply">
+                    <option value="single">Single phase 230 V</option>
+                    <option value="three">Three phase 415 V</option>
+                </select>
+            </label>
+
+            <!-- Same again for getDropLimit(): "power" or "lighting". -->
+            <label>Circuit
+                <select id="circuit">
+                    <option value="power">Power — 5%</option>
+                    <option value="lighting">Lighting — 3%</option>
+                </select>
+            </label>
+
+            <!-- type="submit" makes this button fire the form's submit event. -->
+            <button type="submit">Calculate</button>
+            <button type="reset">Clear</button>
+        </form>
+        <!-- Where input problems are shown. Empty until something is wrong. -->
+        <p id="error"></p>
+
+        <!-- Results table. The tbody is empty until JavaScript fills it. -->
         <table>
             <thead>
                 <tr><th>Case</th><th>Volts dropped</th><th>% drop</th><th>Verdict</th></tr>
@@ -15,6 +53,7 @@
             <tbody id="results"></tbody>
         </table>
 
+        <!-- Last thing in the body, so every element above already exists. -->
         <script src="script.js"></script>
     </body>
 </html>

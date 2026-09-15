@@ -73,22 +73,13 @@ Change to `<` if practice requires the drop to be strictly under.
 - Cascading runs (origin → submain → final circuit) are a later feature.
 - Copper only. No aluminium resistivity constant yet.
 
-## Verified cases — 14 Sep 2026
-
-Hand-worked on paper first, then matched by the code. This is the regression
-baseline: after any change to the maths, re-run all five.
-
-| # | ρ | L (m) | I (A) | A (mm²) | Phase | Vs | Vd (V) | %Vd | Limit | Verdict |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | 0.018 | 25 | 32 | 6 | single | 230 | 4.80 | 2.09 | power | PASS |
-| 2 | 0.018 | 35 | 45 | 10 | single | 230 | 5.67 | 2.47 | power | PASS |
-| 3 | 0.018 | 70 | 32 | 2.5 | single | 230 | 32.26 | 14.02 | lighting | FAIL |
-| 4 | 0.018 | 100 | 20 | 10 | three | 415 | 6.24 | 1.50 | power | PASS |
-| 5 | 0.018 | 150 | 10 | 10 | three | 415 | 4.68 | 1.13 | power | PASS |
-| 6 | 0.018 | 200| 15 | 16 | single | 230 | __ | __ | power | PASS |
-
-Case 3 also fails on current-carrying capacity — 32 A is beyond what 2.5 mm²
-can carry. The calculator does not know that. See Known limitations.
+- Bad input never proceeds. Two kinds, two responses:
+  - A wrong value passed by the CODE (an unrecognised supply type) THROWS.
+    It means the program is wrong and should stop loudly.
+  - A wrong value typed by a PERSON shows a message on the page naming the
+    field and the problem. It means they made a typo, not that the program
+    is broken — and a red console line is invisible to someone on site.
+  Neither ever guesses a default, and neither ever calculates anyway.
 
 ## Still to build
 
@@ -115,3 +106,9 @@ lookup with nothing to go wrong inside it; `calculate` warns there is real work
 worth checking. Functions returning true or false are the exception and read as
 a question: `isValidCsa`, `hasThreePhaseSupply`. Event handlers read as
 `handleCalculateClick`.
+
+- Every block of code carries an inline comment in plain English: what it
+  does, and why it does it that way. Written so a person who does not read
+  JavaScript can follow the logic. A comment never simply restates the
+  line. A comment that no longer matches its code is a defect — fix it in
+  the same edit that changed the code.
