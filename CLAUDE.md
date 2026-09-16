@@ -19,6 +19,43 @@ No framework, no server, no database. Osmoore learning project 2.
   and never round before a comparison.
 - Every calculation is checked against a hand-worked case before it ships.
 
+- Bad input never proceeds. Two kinds, two responses:
+  - A wrong value passed by the CODE (an unrecognised supply type) THROWS.
+    It means the program is wrong and should stop loudly.
+  - A wrong value typed by a PERSON shows a message on the page naming the
+    field and the problem. It means they made a typo, not that the program
+    is broken — and a red console line is invisible to someone on site.
+  Neither ever guesses a default, and neither ever calculates anyway.
+
+- Every block of code carries an inline comment in plain English: what it
+  does, and why it does it that way. Written so a person who does not read
+  JavaScript can follow the logic. A comment never simply restates the
+  line. A comment that no longer matches its code is a defect — fix it in
+  the same edit that changed the code.
+
+
+- The currency of a supplier price is an INPUT, never an assumption. Every
+  price carries the currency it was quoted in.
+- A GHS price is used as-is. No rate is fetched, nothing can go stale, and
+  the job prices with no internet at all.
+- A USD price is converted using the locked rate. If there is no usable
+  rate, USD pricing is unavailable — and the message says exactly that,
+  not that pricing as a whole has failed.
+- Money is integer pesewas. Round ONCE, at the final total. Rounding per
+  metre and then multiplying compounds the error.
+- A quote records the currency quoted. If it was converted, it also records
+  the rate and the time. A cedi-priced quote shows no rate — printing one
+  would imply a conversion that never happened
+
+
+  - Bad input never proceeds. Two kinds, two responses:
+  - A wrong value passed by the CODE (an unrecognised supply type) THROWS.
+    It means the program is wrong and should stop loudly.
+  - A wrong value typed by a PERSON shows a message on the page naming the
+    field and the problem. It means they made a typo, not that the program
+    is broken — and a red console line is invisible to someone on site.
+  Neither ever guesses a default, and neither ever calculates anyway.
+
 ## The method — locked 14 Sep 2026
 
 My own hand calculation. The code is a faithful copy of it. If the method
@@ -73,13 +110,7 @@ Change to `<` if practice requires the drop to be strictly under.
 - Cascading runs (origin → submain → final circuit) are a later feature.
 - Copper only. No aluminium resistivity constant yet.
 
-- Bad input never proceeds. Two kinds, two responses:
-  - A wrong value passed by the CODE (an unrecognised supply type) THROWS.
-    It means the program is wrong and should stop loudly.
-  - A wrong value typed by a PERSON shows a message on the page naming the
-    field and the problem. It means they made a typo, not that the program
-    is broken — and a red console line is invisible to someone on site.
-  Neither ever guesses a default, and neither ever calculates anyway.
+
 
 ## Still to build
 
@@ -106,9 +137,3 @@ lookup with nothing to go wrong inside it; `calculate` warns there is real work
 worth checking. Functions returning true or false are the exception and read as
 a question: `isValidCsa`, `hasThreePhaseSupply`. Event handlers read as
 `handleCalculateClick`.
-
-- Every block of code carries an inline comment in plain English: what it
-  does, and why it does it that way. Written so a person who does not read
-  JavaScript can follow the logic. A comment never simply restates the
-  line. A comment that no longer matches its code is a defect — fix it in
-  the same edit that changed the code.
