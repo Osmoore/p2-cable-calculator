@@ -140,6 +140,366 @@ function evaluateVerdict(percent, limit) {
 }
 
 
+// Standard copper conductor sizes, smallest first. Order matters: the search
+// below walks this list and stops at the first size that passes, so the list
+// must stay sorted ascending.
+const STANDARD_CSA_MM2 = [1, 1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95, 120, 150, 185, 240, 300, 400];
+
+
+// Current-carrying capacity It, in amperes.
+// Source: BS 7671:2018+A2:2022, Appendix 4, Table 4D2A, Column 6
+// Cable type: Multicore 70 °C thermoplastic (PVC) insulated and sheathed,
+//             non-armoured, copper conductors (1 two-core cable, single-phase)
+// Installation method: Reference Method C (clipped direct)
+// Ambient 30 °C, no grouping, no thermal insulation.
+const CURRENT_CAPACITY_A = {
+  1:   15,
+  1.5: 19.5,
+  2.5: 27,
+  4:   36,
+  6:   46,
+  10:  63,
+  16:  85,
+  25:  112,
+  35:  138,
+  50:  168,
+  70:  213,
+  95:  258,
+  120: 299,
+  150: 344,
+  185: 392,
+  240: 461,
+  300: 530,
+  400: 634
+};
+
+// The assumptions behind that table, in one place so the note and the data
+// can never disagree.
+const SIZING_BASIS =
+  "BS 7671 Table 4D2A, Reference Method C, multicore 70 °C thermoplastic, copper";
+
+// Guard: capacity MUST rise with conductor size. A bigger conductor carries
+// more current, never less. If this ever fails, the wrong table has been
+// pasted in — and every size the tool recommends after that would be wrong.
+// Fail loudly here at load, not quietly on site.
+function checkCapacityTableAscends() {
+  let previous = 0;
+
+  for (const size of STANDARD_CSA_MM2) {
+    const capacity = CURRENT_CAPACITY_A[size];
+
+    // A size we do not stock is simply absent. Skip it, don't fail on it.
+    if (capacity === undefined) {
+      continue;
+    }
+
+    if (capacity <= previous) {
+      throw new Error(
+        "Capacity table is not ascending at " + size + " mm² — wrong table?");
+    }
+    previous = capacity;
+  }
+}
+
+checkCapacityTableAscends();
+
+
+// --- correction factors -----------------------------------------------------
+// The capacity table above is for ONE set of conditions: 30 °C ambient, one
+// circuit, no insulation, an MCB. Real installations are hotter, more crowded
+// and sometimes buried in loft insulation. Every one of those makes the cable
+// carry LESS. These four factors are how BS 7671 accounts for that.
+//
+// They are not applied to the cable. They are applied to the REQUIREMENT:
+//     It_required = In / (Ca × Cg × Ci × Cf)
+// and then you find the smallest size whose tabulated It meets it. A 32 A MCB
+// at 40 °C in a group of four needs 32 / (0.87 × 0.75) = 49 A of tabulated
+// capacity, not 32 A.
+
+// Ca — ambient temperature.
+// Source: BS 7671:2018+A2:2022, Appendix 4, Table 4B1
+// 70 °C thermoplastic (PVC) row only. The 90 °C thermosetting row is NOT here
+// on purpose: it belongs with an XLPE capacity table this tool does not hold.
+// Keyed by ambient temperature in °C. 30 °C is the base condition, so 1.00.
+const FACTOR_CA_PVC = {
+  25: 1.03,
+  30: 1.00,
+  35: 0.94,
+  40: 0.87,
+  45: 0.79,
+  50: 0.71,
+  55: 0.61,
+  60: 0.50
+};
+
+// Cg — grouping.
+// Source: BS 7671:2018+A2:2022, Appendix 4, Table 4C1
+// Single layer, clipped direct — the arrangement that matches Reference
+// Method C above. The bunched/conduit column is NOT here: bunched cables need
+// a bunched capacity column too, and this tool only has Method C.
+// Keyed by the number of circuits in the group. One circuit is no group, 1.00.
+const FACTOR_CG_CLIPPED_DIRECT = {
+  1: 1.00,
+  2: 0.85,
+  3: 0.79,
+  4: 0.75,
+  5: 0.73,
+  6: 0.72,
+  7: 0.72,
+  8: 0.71,
+  9: 0.70
+};
+
+// Ci — thermal insulation.
+// Source: BS 7671:2018+A2:2022, Regulation 523.9, Table 52.2
+// Keyed by the route length IN MILLIMETRES that is surrounded by insulation.
+// Zero means the run touches no insulation anywhere, so 1.00.
+const FACTOR_CI = {
+  0:   1.00,
+  50:  0.88,
+  100: 0.78,
+  200: 0.63,
+  400: 0.51
+};
+
+// Cf — protective device type.
+// Source: BS 7671:2018+A2:2022, Regulation 433.1.202
+// A BS 3036 rewireable fuse does not clear an overload as cleanly as an MCB,
+// so the cable must be bigger. Everything else takes no penalty.
+// Keyed by text, not by number — so the numeric guard below does NOT run on it.
+const FACTOR_CF = {
+  standard: 1.00,
+  bs3036:   0.725
+};
+
+
+// Guard for the three NUMERIC factor tables. Three separate things can go
+// wrong when a table is typed in by hand, and this catches all three:
+
+//  1. Keys out of order. NOTE: JavaScript re-sorts WHOLE-NUMBER keys into
+//      ascending order by itself, so for the three tables below this check
+//      can NEVER fire — verified by scrambling Cg and watching it pass. It
+//      earns its place only for a future table keyed by a fraction.
+
+//   2. A factor that RISES — the table went in upside down. Note that EQUAL is
+//      allowed: Table 4C1 really does give 0.72 for both 6 and 7 circuits.
+//      Only an increase is impossible.
+//   3. A factor outside 0 to 1.5 — that is a typo, not a correction factor.
+//
+// Throwing here at load is deliberate. A silently wrong factor under-sizes
+// cable, and nobody finds out until something gets hot.
+function checkFactorTable(tableName, table) {
+  let previousKey = -Infinity;
+  let previousValue = Infinity;
+
+  for (const key of Object.keys(table)) {
+    const numericKey = Number(key);
+    const value = table[key];
+
+    if (numericKey <= previousKey) {
+      throw new Error(tableName + ": keys out of order at " + key);
+    }
+    if (value > previousValue) {
+      throw new Error(tableName + ": factor rises at " + key + " — upside down?");
+    }
+    if (value <= 0 || value > 1.5) {
+      throw new Error(tableName + ": " + value + " at " + key + " is not a factor");
+    }
+
+    previousKey = numericKey;
+    previousValue = value;
+  }
+}
+
+// Each table has a base condition where the factor MUST be exactly 1.00,
+// because that condition is the one the capacity table was measured under.
+// If any of these is not 1.00, the table does not belong with Table 4D2A.
+function checkFactorBaseConditions() {
+  if (FACTOR_CA_PVC[30] !== 1.00) {
+    throw new Error("Ca at 30 °C must be 1.00 — wrong base temperature?");
+  }
+  if (FACTOR_CG_CLIPPED_DIRECT[1] !== 1.00) {
+    throw new Error("Cg for one circuit must be 1.00 — one cable is no group.");
+  }
+  if (FACTOR_CI[0] !== 1.00) {
+    throw new Error("Ci with no insulation must be 1.00.");
+  }
+  if (FACTOR_CF.standard !== 1.00) {
+    throw new Error("Cf for a standard device must be 1.00.");
+  }
+}
+
+checkFactorTable("Ca", FACTOR_CA_PVC);
+checkFactorTable("Cg", FACTOR_CG_CLIPPED_DIRECT);
+checkFactorTable("Ci", FACTOR_CI);
+checkFactorBaseConditions();
+
+
+// Each lookup below THROWS on a value it does not hold. That is deliberate and
+// it is the same rule as getPhaseFactor and getDropLimit: a value the program
+// was not given is a fault in the program, not something to guess around.
+// Nothing here ever interpolates. BS 7671 tabulates factors at fixed points,
+// and the page only ever offers those points, so an unknown value means the
+// page and the table have drifted apart — which is worth stopping for.
+
+// Ca — what the ambient temperature costs.
+function getAmbientFactor(ambientC) {
+  const factor = FACTOR_CA_PVC[ambientC];
+
+  if (factor === undefined) {
+    throw new Error("No Ca value for " + ambientC + " °C");
+  }
+  return factor;
+}
+
+// Cg — what sharing a route with other circuits costs. Count includes THIS
+// circuit, so one means no group.
+function getGroupingFactor(circuitsInGroup) {
+  const factor = FACTOR_CG_CLIPPED_DIRECT[circuitsInGroup];
+
+  if (factor === undefined) {
+    throw new Error("No Cg value for " + circuitsInGroup + " circuits");
+  }
+  return factor;
+}
+
+// Ci — what being buried in thermal insulation costs, by route length in mm.
+function getInsulationFactor(insulationMm) {
+  const factor = FACTOR_CI[insulationMm];
+
+  if (factor === undefined) {
+    throw new Error("No Ci value for " + insulationMm + " mm in insulation");
+  }
+  return factor;
+}
+
+// Cf — what the protective device costs. Keyed by text, not number.
+function getDeviceFactor(deviceType) {
+  const factor = FACTOR_CF[deviceType];
+
+  if (factor === undefined) {
+    throw new Error("Unknown device type: " + deviceType);
+  }
+  return factor;
+}
+
+// All four multiplied together. Kept as its own function rather than written
+// inline so there is exactly ONE place the four factors combine. If BS 7671
+// ever changes how they compound, it changes here and nowhere else.
+function calculateTotalCorrectionFactor(ca, cg, ci, cf) {
+  return ca * cg * ci * cf;
+}
+
+// Reads all four conditions off the page and returns them as ONE object.
+//
+// This function returns an object rather than a single number on purpose. The
+// sizing note has to show its working — "0.87 × 0.75 = 0.65" tells the person
+// WHY the tool wants 10 mm², where a bare 0.65 tells them nothing. So the
+// individual factors travel alongside the total instead of being thrown away.
+//
+// Remember that .value always hands back TEXT. Number() turns it into a number
+// before the lookup, so "40" from the page and 40 from a test both find the
+// same row.
+function readCorrectionFactors() {
+  const ambientC = Number(document.getElementById("ambient").value);
+  const circuitsInGroup = Number(document.getElementById("circuits-in-group").value);
+  const insulationMm = Number(document.getElementById("insulation-mm").value);
+  const deviceType = document.getElementById("device-type").value;
+
+  const ca = getAmbientFactor(ambientC);
+  const cg = getGroupingFactor(circuitsInGroup);
+  const ci = getInsulationFactor(insulationMm);
+  const cf = getDeviceFactor(deviceType);
+
+  return {
+    ca: ca,
+    cg: cg,
+    ci: ci,
+    cf: cf,
+    total: calculateTotalCorrectionFactor(ca, cg, ci, cf),
+    ambientC: ambientC,
+    circuitsInGroup: circuitsInGroup,
+    insulationMm: insulationMm,
+    deviceType: deviceType
+  };
+}
+
+// Standard MCB ratings, BS EN 60898, ascending.
+const STANDARD_DEVICE_RATINGS_A = [6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125];
+
+// The smallest standard device rating at or above the design current.
+// BS 7671 Reg 433.1.1: Ib <= In <= Iz. The cable carries In, not Ib, because
+// an overload between the two will never trip the device.
+function selectDeviceRating(designCurrent) {
+  for (const rating of STANDARD_DEVICE_RATINGS_A) {
+    if (rating >= designCurrent) {
+      return rating;
+    }
+  }
+  return null;  // past the end of the ladder this tool covers
+}
+
+// The smallest listed size that can carry the device rating ONCE the
+// installation conditions are accounted for.
+//
+// The factors do not shrink the cable. They inflate the requirement:
+//     It_required = In / (Ca × Cg × Ci × Cf)
+// A 32 A device in conditions worth 0.6525 needs a cable TABULATED at 49.0 A,
+// because in those conditions a 49.0 A cable really only carries 32 A.
+function findSmallestCsaForCapacity(deviceRating, correctionTotal) {
+  // Written as "not greater than zero" rather than "less than or equal to
+  // zero" on purpose. Every comparison against NaN is false, so NaN <= 0 is
+  // false and a NaN would slip straight through. !(NaN > 0) is true, so this
+  // form catches zero, negatives AND NaN. Dividing by any of them would
+  // return a confident wrong size instead of stopping.
+  if (!(correctionTotal > 0)) {
+    throw new Error("Correction factor must be above zero, got " + correctionTotal);
+  }
+
+  const requiredTabulatedCurrent = deviceRating / correctionTotal;
+
+  for (const candidate of STANDARD_CSA_MM2) {
+    const capacity = CURRENT_CAPACITY_A[candidate];
+
+    if (capacity !== undefined && capacity >= requiredTabulatedCurrent) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+// How much of the permitted volt drop this run actually uses, as a percentage
+// of the allowance. 2.09% against a 5% limit is 42% of the allowance — a very
+// different engineering fact from 96%, which PASS/FAIL hides completely.
+function calculateHeadroomPercent(percent, limit) {
+  return (percent / limit) * 100;
+}
+
+// The smallest standard size that stays inside the volt drop limit for this
+// run, or null if nothing up to 400 mm² does.
+// NOT a recommendation — volt drop is one constraint of several, and it is
+// usually not the binding one. See Known limitations in CLAUDE.md.
+function findSmallestCsaForVoltDrop(supplyType, lengthMetres, current, supplyVoltage, limit) {
+  for (const candidate of STANDARD_CSA_MM2) {
+
+    // Exactly the same three functions the real calculation uses. The maths
+    // lives in one place; this just asks it a question eighteen times.
+    const resistance = calculateConductorResistance(RHO_COPPER, lengthMetres, candidate);
+    const volts = calculateVoltageDrop(getPhaseFactor(supplyType), resistance, current);
+    const percent = calculateDropPercent(volts, supplyVoltage);
+
+    // The list is sorted smallest first, so the first size that passes IS the
+    // smallest that passes. "return" leaves the function immediately — there
+    // is no point checking the fourteen larger sizes.
+    if (percent <= limit) {
+      return candidate;
+    }
+  }
+
+  // Fell off the end: nothing on the list is big enough.
+  return null;
+}
+
 // Checks one typed value and returns a plain-English description of what is
 // wrong with it, or an empty string if it is fine. Returns a message rather
 // than throwing: a typo by the person using the calculator is not a fault in
@@ -245,6 +605,115 @@ form.addEventListener("submit", function (event) {
   const volts = calculateVoltageDrop(getPhaseFactor(supply), resistance, current);
   const percent = calculateDropPercent(volts, voltage);
   const result = evaluateVerdict(percent, getDropLimit(circuit));
+
+
+    // --- sizing -------------------------------------------------------------
+  // Answers the question the person actually has on site: what size does this
+  // run need? A cable must satisfy BOTH current-carrying capacity and volt
+  // drop, so the larger of the two minimums governs.
+  const limit = getDropLimit(circuit);
+  const headroom = calculateHeadroomPercent(percent, limit);
+  const sizingNote = document.getElementById("sizing-note");
+
+  // In is derived from Ib by default, but can be overridden. Auto-selection
+  // assumes a BS EN 60898 MCB — it does not hold for BS 3036 rewireable fuses
+  // (Cf 0.725) or motor circuits sized on starting current.
+  const deviceText = document.getElementById("device-rating").value;
+  let deviceRating = selectDeviceRating(current);
+  let deviceSource = "derived";
+
+  if (deviceText.trim() !== "") {
+    const deviceProblem = describeNumberProblem(deviceText, "Device rating");
+    if (deviceProblem !== "") {
+      errorBox.textContent = deviceProblem;
+      return;
+    }
+    deviceRating = Number(deviceText);
+    deviceSource = "entered";
+  }
+
+
+  // The installation conditions, read ONCE. Used in three places below: the
+  // capacity search, the Iz figure and the note. Reading once means the number
+  // quoted to the person is always the number the tool actually used.
+  const factors = readCorrectionFactors();
+
+  // A BS 3036 fuse is not on the BS EN 60898 ladder, so a derived rating here
+  // would be a made-up number wearing a real one's clothes. This tool does not
+  // hold the BS 3036 ratings yet, so it asks instead of guessing.
+  if (factors.deviceType === "bs3036" && deviceSource === "derived") {
+    errorBox.textContent =
+      "BS 3036 rewireable fuse selected — enter the fuse rating in the " +
+      "Device rating box. This tool holds the BS EN 60898 ladder only.";
+    return;
+  }
+
+  if (deviceRating === null) {
+    // Ib is past the end of the device ladder this tool knows.
+    sizingNote.textContent =
+      `Design current ${current} A is above the largest device rating this tool ` +
+      `covers (125 A). Size this run by hand.`;
+
+  } else {
+    const csaForVoltDrop = findSmallestCsaForVoltDrop(supply, length, current, voltage, limit);
+    const csaForCapacity = findSmallestCsaForCapacity(deviceRating, factors.total);
+
+    // The binding constraint is whichever demands the bigger conductor.
+    let minimumCsa = null;
+    let governedBy = "";
+
+    if (csaForCapacity !== null && csaForVoltDrop !== null) {
+      if (csaForCapacity >= csaForVoltDrop) {
+        minimumCsa = csaForCapacity;
+        governedBy = "current-carrying capacity";
+      } else {
+        minimumCsa = csaForVoltDrop;
+        governedBy = "volt drop";
+      }
+    }
+
+    let note = "";
+
+    if (minimumCsa === null) {
+      note =
+        `No size up to 400 mm² satisfies both checks on this run. ` +
+        `Split the circuit or size by hand. `;
+    } else {
+      note =
+        `Minimum ${minimumCsa} mm² — governed by ${governedBy}. ` +
+        `Ib ${current} A → In ${deviceRating} A (${deviceSource}) → ` +
+        `It ${CURRENT_CAPACITY_A[minimumCsa]} A tabulated → ` +
+        `Iz ${(CURRENT_CAPACITY_A[minimumCsa] * factors.total).toFixed(1)} A here. `;
+
+      if (csa > minimumCsa) {
+        note += `You specified ${csa} mm²; ${minimumCsa} mm² satisfies both checks. `;
+      } else if (csa < minimumCsa) {
+        note += `You specified ${csa} mm² — that is UNDERSIZED. `;
+      }
+    }
+
+        // Plain words for the note. "bs3036" is a key, not something to show a
+    // person. If/else rather than a one-liner, same as everywhere else here.
+    let deviceWords = "MCB / RCBO / BS 88 fuse";
+    if (factors.deviceType === "bs3036") {
+      deviceWords = "BS 3036 rewireable fuse";
+    }
+
+    // The note now SHOWS ITS WORKING. Four factors and the number they
+    // multiply to. A person who disagrees with the answer can see which
+    // assumption to argue with, instead of arguing with the whole tool.
+    note +=
+      `Volt drop at ${csa} mm² is ${percent.toFixed(2)}% — ` +
+      `${headroom.toFixed(0)}% of the ${limit.toFixed(1)}% allowance. ` +
+      `Conditions: ${factors.ambientC} °C (Ca ${factors.ca}), ` +
+      `${factors.circuitsInGroup} circuit(s) (Cg ${factors.cg}), ` +
+      `${factors.insulationMm} mm in insulation (Ci ${factors.ci}), ` +
+      `${deviceWords} (Cf ${factors.cf}) ` +
+      `→ combined ${factors.total.toFixed(3)}. ` +
+      `Sized on ${SIZING_BASIS}.`;
+
+    sizingNote.textContent = note;
+  }
 
   // Put the answer at the TOP of the table, above the verified cases, so the
   // newest result is the first thing the user sees.

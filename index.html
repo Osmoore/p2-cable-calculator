@@ -49,6 +49,14 @@
                  to catch it so the rules live in one place we control. -->
             <label>Length (m) <input type="text" id="length"></label>
             <label>Current (A) <input type="text" id="current"></label>
+
+            
+            <!-- Protective device rating In. Leave EMPTY and the tool picks
+                 the next standard BS EN 60898 rating at or above Ib. Fill it
+                 in when that assumption does not hold — a BS 3036 rewireable
+                 fuse, or a motor circuit sized on starting current. -->
+            <label>Device rating (A, optional) <input type="text" id="device-rating"></label>
+
             <label>CSA (mm²) <input type="text" id="csa"></label>
 
             <!-- The value="..." strings are exactly what getPhaseFactor()
@@ -68,6 +76,76 @@
                 </select>
             </label>
 
+
+            <!-- Installation conditions. The capacity table above holds ONE
+                 set of conditions: 30 °C ambient, one circuit, no insulation,
+                 an MCB. These four selects say how far this run differs from
+                 that. Every one of them can only make the cable carry LESS,
+                 never more — which is why leaving them alone is the safe
+                 default and changing them always costs you capacity.
+
+                 SELECTS, not text boxes, on purpose. BS 7671 tabulates these
+                 factors at fixed points only. A text box invites someone to
+                 type 38 °C, and the tool would then have to choose between
+                 the 35 row and the 40 row. This tool does not guess. -->
+
+            <!-- Ca. These values are the keys of FACTOR_CA_PVC, exactly.
+                 30 °C is the base the capacity table was measured at. -->
+            <label>Ambient temperature (°C)
+                <select id="ambient">
+                    <option value="25">25</option>
+                    <option value="30" selected>30 — table base</option>
+                    <option value="35">35</option>
+                    <option value="40">40</option>
+                    <option value="45">45</option>
+                    <option value="50">50</option>
+                    <option value="55">55</option>
+                    <option value="60">60</option>
+                </select>
+            </label>
+
+            <!-- Cg. Count every circuit in the group INCLUDING this one.
+                 One circuit is not a group, so the factor is 1.00. -->
+            <label>Circuits in group
+                <select id="circuits-in-group">
+                    <option value="1" selected>1 — not grouped</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                </select>
+            </label>
+
+            <!-- Ci. Route length surrounded by thermal insulation, in mm.
+                 Table 52.2 stops at 400 mm. A run buried deeper than that is
+                 NOT covered by this list — there is a separate rule in Reg
+                 523.9 for a cable totally surrounded, and this tool does not
+                 hold it yet. -->
+            <label>In thermal insulation (mm)
+                <select id="insulation-mm">
+                    <option value="0" selected>0 — none</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="400">400</option>
+                </select>
+            </label>
+
+            <!-- Cf. These values are the keys of FACTOR_CF, exactly.
+                 Choosing BS 3036 means the Device rating box above must be
+                 filled in by hand: this tool holds the BS EN 60898 ladder
+                 only, and the BS 3036 ratings are a different list. -->
+            <label>Protective device
+                <select id="device-type">
+                    <option value="standard" selected>MCB / RCBO / BS 88 fuse</option>
+                    <option value="bs3036">BS 3036 rewireable fuse</option>
+                </select>
+            </label>
+
             <!-- Supplier price per metre, in whichever currency is selected
                  at the top of the page. OPTIONAL — leave it empty for a volt
                  drop check with no pricing. -->
@@ -78,6 +156,12 @@
         </form>
         <!-- Where input problems are shown. Empty until something is wrong. -->
         <p id="error"></p>
+
+
+        <!-- Sizing sanity note. Says how much of the volt drop allowance the
+             run uses, and how small volt drop alone would permit — so an
+             over-specified cable is visible instead of silently passing. -->
+        <p id="sizing-note"></p>
 
         <!-- Results table. The tbody is empty until JavaScript fills it. -->
         <table>
