@@ -1,7 +1,18 @@
 console.log("Calculator loaded");
 
-// Copper at operating temperature, ohm·mm²/m
-const RHO_COPPER = 0.018;
+// Copper at its 70 °C operating temperature, Ω·mm²/m.
+//
+// 0.022, not the 0.018 this project started with. The old figure was close to
+// copper at 20 °C, and it made every volt drop this tool produced about 20%
+// optimistic — in the unsafe direction.
+//
+// This value came from the project's own data, not from an outside claim.
+// Rearranging mV/A/m = 2 × ρ × 1000 ÷ A across all eighteen sizes of
+// Table 4D2B gives a mean of 0.02202, inside a band of 0.0213 to 0.0233.
+//
+// FALLBACK ONLY as of 17 Sep 2026. The tabulated figure governs wherever the
+// table covers the size; this is what happens for a non-standard CSA.
+const RHO_COPPER = 0.022;
 
 // Go-and-return path, single phase
 const SINGLE_PHASE = 2;
@@ -334,6 +345,198 @@ checkFactorTable("Cg", FACTOR_CG_CLIPPED_DIRECT);
 checkFactorTable("Ci", FACTOR_CI);
 checkFactorBaseConditions();
 
+// Voltage drop per ampere per metre (mV/A/m).
+// Source: BS 7671:2018+A2:2022, Appendix 4, Table 4D2B
+// Multicore 70 °C thermoplastic (PVC), non-armoured, copper. 70 °C operating.
+//
+// These numbers ALREADY contain the phase factor — 2 for the single-phase
+// column, 1.732 for the three-phase column. Never apply it a second time.
+//
+// r = resistive part, x = inductive reactance, z = total impedance.
+// Below 25 mm² reactance is negligible and z equals r. Above it, z is what
+// the drop is calculated from, because a real a.c. circuit feels both.
+const VOLTAGE_DROP_TABLE_4D2B = {
+  // Columns 3 to 6: two-core cable, d.c. or single-phase a.c.
+  singlePhase: {
+    1:   { r: 44,    x: 0,     z: 44 },
+    1.5: { r: 29,    x: 0,     z: 29 },
+    2.5: { r: 18,    x: 0,     z: 18 },
+    4:   { r: 11,    x: 0,     z: 11 },
+    6:   { r: 7.3,   x: 0,     z: 7.3 },
+    10:  { r: 4.4,   x: 0,     z: 4.4 },
+    16:  { r: 2.8,   x: 0,     z: 2.8 },
+    25:  { r: 1.75,  x: 0.170, z: 1.75 },
+    35:  { r: 1.25,  x: 0.165, z: 1.25 },
+    50:  { r: 0.93,  x: 0.160, z: 0.94 },
+    70:  { r: 0.63,  x: 0.155, z: 0.65 },
+    95:  { r: 0.46,  x: 0.150, z: 0.49 },
+    120: { r: 0.36,  x: 0.145, z: 0.39 },
+    150: { r: 0.29,  x: 0.145, z: 0.32 },
+    185: { r: 0.23,  x: 0.145, z: 0.27 },
+    240: { r: 0.180, x: 0.140, z: 0.230 },
+    300: { r: 0.145, x: 0.140, z: 0.200 },
+    400: { r: 0.115, x: 0.135, z: 0.180 }
+  },
+
+  // Columns 7 to 10: three- or four-core cable, balanced three-phase a.c.
+  threePhase: {
+    1:   { r: 38,    x: 0,     z: 38 },
+    1.5: { r: 25,    x: 0,     z: 25 },
+    2.5: { r: 15,    x: 0,     z: 15 },
+    4:   { r: 9.5,   x: 0,     z: 9.5 },
+    6:   { r: 6.4,   x: 0,     z: 6.4 },
+    10:  { r: 3.8,   x: 0,     z: 3.8 },
+    16:  { r: 2.4,   x: 0,     z: 2.4 },
+    25:  { r: 1.50,  x: 0.145, z: 1.50 },
+    35:  { r: 1.10,  x: 0.145, z: 1.10 },
+    50:  { r: 0.80,  x: 0.140, z: 0.81 },
+    70:  { r: 0.55,  x: 0.135, z: 0.57 },
+    95:  { r: 0.40,  x: 0.130, z: 0.42 },
+    120: { r: 0.31,  x: 0.130, z: 0.34 },
+    150: { r: 0.25,  x: 0.125, z: 0.28 },
+    185: { r: 0.20,  x: 0.125, z: 0.24 },
+    240: { r: 0.155, x: 0.120, z: 0.195 },
+    300: { r: 0.125, x: 0.120, z: 0.175 },
+    400: { r: 0.100, x: 0.120, z: 0.155 }
+  }
+};
+
+
+// Tabulated figures are ROUNDED, so no check here can demand exact equality.
+// The worst real deviation in this table is 1.73%, so 2.5% leaves room for
+// the rounding without leaving room for a typo.
+const Z_TOLERANCE_PERCENT = 2.5;
+
+// The resistivity these r values imply, in Ω·mm²/m. Every size in this table
+// lands between 0.0213 and 0.0233, so this window passes the real data
+// comfortably while catching a misplaced decimal point anywhere in 36 numbers.
+const RHO_IMPLIED_MIN = 0.020;
+const RHO_IMPLIED_MAX = 0.024;
+
+
+// Guard 1: z must be the hypotenuse of r and x.
+// Resistance and reactance act at right angles to each other, so they combine
+// like the two short sides of a right-angled triangle: z = √(r² + x²). Three
+// numbers that must agree means a typo in any one of them shows up here
+// instead of in somebody's cable.
+function checkImpedanceModulus(columnName, column) {
+  for (const size of Object.keys(column)) {
+    const row = column[size];
+    const computed = Math.hypot(row.r, row.x);
+    const deviation = Math.abs(computed - row.z) / row.z * 100;
+
+    if (deviation > Z_TOLERANCE_PERCENT) {
+      throw new Error(
+        columnName + " " + size + " mm²: z is " + row.z + " but √(r²+x²) is " +
+        computed.toFixed(4) + " — check r, x and z");
+    }
+  }
+}
+
+// Guard 2: the two columns must describe the same conductor.
+// The single-phase column carries the ×2 go-and-return factor; the three-phase
+// column carries ×1.732. So dividing one by the other must give
+// 1.732 ÷ 2 = 0.866 at EVERY size. If a whole column is ever pasted into the
+// wrong slot this catches it, even when both columns are individually perfect.
+function checkPhaseColumnsAgree() {
+  const single = VOLTAGE_DROP_TABLE_4D2B.singlePhase;
+  const three = VOLTAGE_DROP_TABLE_4D2B.threePhase;
+
+  for (const size of Object.keys(single)) {
+    if (three[size] === undefined) {
+      throw new Error("Table 4D2B: " + size + " mm² is missing from threePhase");
+    }
+
+    const ratio = three[size].z / single[size].z;
+
+    if (ratio < 0.82 || ratio > 0.91) {
+      throw new Error(
+        "Table 4D2B " + size + " mm²: three-phase ÷ single-phase is " +
+        ratio.toFixed(4) + ", expected about 0.866 — columns swapped?");
+    }
+  }
+}
+
+// Guard 3: the resistivity this table implies must be physically sensible.
+// Rearranging mV/A/m = 2 × ρ × 1000 ÷ A gives ρ = r × A ÷ 2000. Copper at its
+// 70 °C operating temperature is about 0.022. This is the strongest of the
+// three checks: one wrong digit anywhere in the r column moves its size
+// straight out of the window.
+function checkImpliedResistivity() {
+  const single = VOLTAGE_DROP_TABLE_4D2B.singlePhase;
+
+  for (const size of Object.keys(single)) {
+    const rho = single[size].r * Number(size) / 2000;
+
+    if (rho < RHO_IMPLIED_MIN || rho > RHO_IMPLIED_MAX) {
+      throw new Error(
+        "Table 4D2B " + size + " mm²: implies ρ = " + rho.toFixed(5) +
+        ", outside " + RHO_IMPLIED_MIN + "–" + RHO_IMPLIED_MAX + " — typo?");
+    }
+  }
+}
+
+checkImpedanceModulus("singlePhase", VOLTAGE_DROP_TABLE_4D2B.singlePhase);
+checkImpedanceModulus("threePhase", VOLTAGE_DROP_TABLE_4D2B.threePhase);
+checkPhaseColumnsAgree();
+checkImpliedResistivity();
+
+
+// Which column of Table 4D2B this supply uses. Same throw-on-unknown rule as
+// getPhaseFactor, and for the same reason: picking the wrong column here would
+// be a 15% error nobody would ever see.
+function getVoltageDropColumn(supplyType) {
+  if (supplyType === "single") {
+    return VOLTAGE_DROP_TABLE_4D2B.singlePhase;
+  }
+  if (supplyType === "three") {
+    return VOLTAGE_DROP_TABLE_4D2B.threePhase;
+  }
+  throw new Error("Unknown supply type: " + supplyType);
+}
+
+// The tabulated figure for one size on one supply type, in mV/A/m.
+//
+// Returns z, not r — decided 17 Sep 2026. z includes reactance, which matters
+// from 25 mm² upward. Below that the table gives x as zero, so z and r are the
+// same number and this choice costs nothing on small cables.
+function getMilliVoltsPerAmpPerMetre(supplyType, csa) {
+  const column = getVoltageDropColumn(supplyType);
+  const row = column[csa];
+
+  if (row === undefined) {
+    throw new Error("Table 4D2B has no entry for " + csa + " mm²");
+  }
+  return row.z;
+}
+
+// Volt drop by the tabulated method, in volts.
+//
+// Two things make this shorter than it looks. The table is in MILLIvolts, so
+// divide by 1000. And there is NO phase factor here — no 2, no 1.732 — because
+// the published number already contains it. Applying it again is the classic
+// way to double a volt drop and never notice.
+function calculateTabulatedVoltageDrop(supplyType, lengthMetres, current, csa) {
+  const mvPerAmpPerMetre = getMilliVoltsPerAmpPerMetre(supplyType, csa);
+
+  return (mvPerAmpPerMetre * current * lengthMetres) / 1000;
+}
+
+// Plain words for how far apart the two methods are, measured against the
+// published figure because that is the one with authority. Returns text for
+// display, never a number for arithmetic.
+function describeMethodGap(resistivityVolts, tabulatedVolts) {
+  const differencePercent =
+    (resistivityVolts - tabulatedVolts) / tabulatedVolts * 100;
+
+  if (Math.abs(differencePercent) < 0.05) {
+    return "methods agree";
+  }
+  if (differencePercent < 0) {
+    return "resistivity " + Math.abs(differencePercent).toFixed(1) + "% LOW";
+  }
+  return "resistivity " + differencePercent.toFixed(1) + "% high";
+}
 
 // Each lookup below THROWS on a value it does not hold. That is deliberate and
 // it is the same rule as getPhaseFactor and getDropLimit: a value the program
@@ -472,7 +675,50 @@ function findSmallestCsaForCapacity(deviceRating, correctionTotal) {
 // of the allowance. 2.09% against a 5% limit is 42% of the allowance — a very
 // different engineering fact from 96%, which PASS/FAIL hides completely.
 function calculateHeadroomPercent(percent, limit) {
-  return (percent / limit) * 100;
+  return (percent / limit) * 100;}
+
+
+// The volt drop for one run, by BOTH methods, with Table 4D2B governing.
+//
+// Decided 17 Sep 2026. The table is what BS 7671 publishes, it already carries
+// the phase factor, and it is built from the resistance of a real stranded
+// conductor at its operating temperature rather than from an assumed ρ.
+//
+// The resistivity formula does not go away. It stays for two jobs: as the
+// cross-check that found this problem in the first place, and as the fallback
+// for a size the table does not list.
+//
+// Returns an OBJECT, not a number, because the page has to be able to show
+// both figures. A tool that quietly picks one of two disagreeing answers is
+// hiding the disagreement, and the disagreement is the useful part.
+function calculateRunVoltageDrop(supplyType, lengthMetres, current, csa, supplyVoltage) {
+  const resistance = calculateConductorResistance(RHO_COPPER, lengthMetres, csa);
+  const resistivityVolts =
+    calculateVoltageDrop(getPhaseFactor(supplyType), resistance, current);
+
+  // Is this size in the table? Every standard size is. A non-standard CSA
+  // typed by hand — 3 mm², say — is not, and falls back to the formula.
+  const column = getVoltageDropColumn(supplyType);
+  const isTabulated = column[csa] !== undefined;
+
+  let tabulatedVolts = null;
+  let volts = resistivityVolts;
+  let source = "resistivity";
+
+  if (isTabulated) {
+    tabulatedVolts =
+      calculateTabulatedVoltageDrop(supplyType, lengthMetres, current, csa);
+    volts = tabulatedVolts;
+    source = "Table 4D2B";
+  }
+
+  return {
+    volts: volts,
+    percent: calculateDropPercent(volts, supplyVoltage),
+    resistivityVolts: resistivityVolts,
+    tabulatedVolts: tabulatedVolts,
+    source: source
+  };
 }
 
 // The smallest standard size that stays inside the volt drop limit for this
@@ -482,11 +728,12 @@ function calculateHeadroomPercent(percent, limit) {
 function findSmallestCsaForVoltDrop(supplyType, lengthMetres, current, supplyVoltage, limit) {
   for (const candidate of STANDARD_CSA_MM2) {
 
-    // Exactly the same three functions the real calculation uses. The maths
-    // lives in one place; this just asks it a question eighteen times.
-    const resistance = calculateConductorResistance(RHO_COPPER, lengthMetres, candidate);
-    const volts = calculateVoltageDrop(getPhaseFactor(supplyType), resistance, current);
-    const percent = calculateDropPercent(volts, supplyVoltage);
+       // Exactly the same function the real calculation uses, so the size this
+    // search recommends is judged by the rule the answer is judged by. If the
+    // search used a different method from the verdict, the tool could recommend
+    // a size and then fail it.
+    const drop = calculateRunVoltageDrop(supplyType, lengthMetres, current, candidate, supplyVoltage);
+    const percent = drop.percent; 
 
     // The list is sorted smallest first, so the first size that passes IS the
     // smallest that passes. "return" leaves the function immediately — there
@@ -545,10 +792,20 @@ for (const run of cases) {
   const volts = calculateVoltageDrop(getPhaseFactor(run.supply), resistance, run.current);
   const percent = calculateDropPercent(volts, run.voltage);
   const result = evaluateVerdict(percent, getDropLimit(run.circuit));
-  console.log(`${run.name}: ${volts.toFixed(2)} V | ${percent.toFixed(2)} % | ${result}`);
-    // The verified cases carry no price, so their cost cell is a dash — the
-  // table has five columns now and every row must have five.
-  rows += `<tr><td>${run.name}</td><td>${volts.toFixed(2)}</td><td>${percent.toFixed(2)}</td><td>${result}</td><td>—</td></tr>`;
+    console.log(`${run.name}: ${volts.toFixed(2)} V | ${percent.toFixed(2)} % | ${result}   resistivity`);
+
+  // THE CROSS-CHECK. Two independent routes to the same physical number: your
+  // resistivity formula, and the figure BS 7671 publishes. They should agree.
+  // Where they do not, one of them is wrong, and the gap says by how much.
+  const tabVolts = calculateTabulatedVoltageDrop(run.supply, run.length, run.current, run.csa);
+  const tabPercent = calculateDropPercent(tabVolts, run.voltage);
+  const tabResult = evaluateVerdict(tabPercent, getDropLimit(run.circuit));
+  console.log(`        ${tabVolts.toFixed(2)} V | ${tabPercent.toFixed(2)} % | ${tabResult}   tabulated 4D2B  (${describeMethodGap(volts, tabVolts)})`);
+    // The TABULATED figure goes in the table, because that is now what governs.
+  // The console above still shows both, which is where the cross-check lives.
+  // One basis for every row: a table mixing two methods is a table nobody can
+  // read.
+  rows += `<tr><td>${run.name}</td><td>${tabVolts.toFixed(2)}</td><td>${tabPercent.toFixed(2)}</td><td>${tabResult}</td><td>—</td></tr>`; 
 }
 
 document.getElementById("results").innerHTML = rows;
@@ -601,11 +858,12 @@ form.addEventListener("submit", function (event) {
   // Exactly the same functions the five verified cases use. The maths lives
   // in one place; the form is just another way of feeding it.
   const voltage = getSupplyVoltage(supply);
-  const resistance = calculateConductorResistance(RHO_COPPER, length, csa);
-  const volts = calculateVoltageDrop(getPhaseFactor(supply), resistance, current);
-  const percent = calculateDropPercent(volts, voltage);
+  
+    // Both methods in one call. Table 4D2B governs wherever it covers the size.
+  const drop = calculateRunVoltageDrop(supply, length, current, csa, voltage);
+  const volts = drop.volts;
+  const percent = drop.percent;
   const result = evaluateVerdict(percent, getDropLimit(circuit));
-
 
     // --- sizing -------------------------------------------------------------
   // Answers the question the person actually has on site: what size does this
