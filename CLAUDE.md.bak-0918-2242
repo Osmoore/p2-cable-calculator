@@ -221,17 +221,6 @@ Change to `<` if practice requires the drop to be strictly under.
   and a load-time guard checks the ratio stays below 1 at every size — if the
   columns are ever swapped it fires, even though both are individually
   perfect ascending tables.
-- The installation arrangement decides TWO things, not one: the Table 4D2A
-  capacity column AND which row of Table 4C1 supplies Cg. Conduit is bunched;
-  clipped direct is a single layer on a surface; a tray is a single layer with
-  more air. They are one input in the code (INSTALLATION_ARRANGEMENTS) because
-  two inputs would let someone pick a combination that does not exist.
-- Method E appears three times in that list. "On a tray" does not pick a Cg —
-  touching, spaced horizontal and spaced vertical are three different rows of
-  Table 4C1 sharing one capacity column.
-- Capacity rises A < B < C < E at every size, both phases, because that is the
-  order in which the cable can shed heat. A load-time guard checks it, and it
-  is what catches a whole method column dropped into the wrong slot.
 - The two columns of Table 4D2B are related. Dividing three-phase by
   single-phase gives 1.732 ÷ 2 = 0.866 at every size. This is a load-time
   guard, and it catches a whole column pasted into the wrong slot even when
@@ -247,8 +236,9 @@ are gentler than the column actually in use.
 25:1.02, 30:1.00, 35:0.96, 40:0.91, 45:0.87, 50:0.82, 55:0.76, 60:0.71,
 65:0.65, 70:0.58, 75:0.50, 80:0.41
 
-*(The bunched Cg column was parked here from 17 to 18 Sep 2026 waiting for a
-capacity column to pair with. Methods A and B gave it one, and it now ships.)*
+**Cg, bunched or in conduit/trunking, Table 4C1** — needs a Method B column:
+1:1.00, 2:0.80, 3:0.70, 4:0.65, 5:0.60, 6:0.57, 7:0.54, 8:0.52, 9:0.50,
+12:0.45, 16:0.41, 20:0.38
 
 ## Known limitations — 17 Sep 2026
 
@@ -256,12 +246,11 @@ The tool sizes on current-carrying capacity AND volt drop, with Ca, Cg, Ci
 and Cf applied, and cross-checks volt drop against Table 4D2B. What it still
 does not know:
 
-- FOUR installation methods: A (conduit in an insulating wall), B (conduit on
-  a wall or in trunking), C (clipped direct) and E (perforated tray, in three
-  arrangements). Table 4D2A cols 2 to 9. Methods D, F and G are NOT held, nor
-  is any single-core arrangement.
-- Multicore 70 °C thermoplastic, non-armoured, copper only. Armoured (SWA)
-  cable has its own tables and is not covered.
+- ONE installation method: Reference Method C (clipped direct), multicore
+  70 °C thermoplastic, copper, Table 4D2A cols 6 and 7, and Table 4D2B. The grouping
+  factor is the clipped-direct single-layer column only — a bunched or
+  in-conduit run is NOT covered, and would need its own capacity column as
+  well as its own Cg.
 - Ci stops at 400 mm. A cable totally surrounded by insulation over a longer
   route is not held. Size that by hand.
 - The BS 3036 rating ladder is not held. Selecting a BS 3036 fuse requires the
@@ -282,19 +271,20 @@ conditions you declared.**
 
 ## Still to build — in the order chosen 17 Sep 2026
 
-1. Aluminium. One resistivity constant, one more capacity table.
-2. Earth fault loop impedance and disconnection time. Needs R1+R2 per metre
+1. More installation methods. One extra Table 4D2A and 4D2B column per
+   method, plus a select. This is what unlocks the parked bunched Cg column.
+2. Aluminium. One resistivity constant, one more capacity table.
+3. Earth fault loop impedance and disconnection time. Needs R1+R2 per metre
    per size, max Zs per device type and rating, and the earthing arrangement
    as an input. Much larger than anything above it.
-3. Adiabatic check on CPC sizing. Needs k values and fault current. Pairs
+4. Adiabatic check on CPC sizing. Needs k values and fault current. Pairs
    naturally with 3 — same data, same session.
-4. Cascading runs (origin → submain → final circuit). A data-model change,
+5. Cascading runs (origin → submain → final circuit). A data-model change,
    not a table: the tool would hold a chain of runs and budget the total drop
    across them.
 
 Done and struck off: current-carrying capacity (16 Sep), correction factors
-Ca/Cg/Ci/Cf (17 Sep), tabulated mV/A/m cross-check (17 Sep), capacity column by
-core count (18 Sep), installation methods A/B/C/E (18 Sep).
+Ca/Cg/Ci/Cf (17 Sep), tabulated mV/A/m cross-check (17 Sep).
 
 ## Naming — resolved 14 Sep 2026
 

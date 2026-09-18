@@ -76,7 +76,6 @@
                 </select>
             </label>
 
-
             <!-- Installation conditions. The capacity table above holds ONE
                  set of conditions: 30 °C ambient, one circuit, no insulation,
                  an MCB. These four selects say how far this run differs from
@@ -88,6 +87,23 @@
                  factors at fixed points only. A text box invites someone to
                  type 38 °C, and the tool would then have to choose between
                  the 35 row and the 40 row. This tool does not guess. -->
+
+            <!-- The arrangement. FIRST in this group because it decides more
+                 than anything else here: it picks the capacity column AND the
+                 grouping table. The value strings are the keys of
+                 INSTALLATION_ARRANGEMENTS, exactly.
+                 C is selected by default — the tool's original assumption, so
+                 nobody's existing habit changes. -->
+            <label>Installation arrangement
+                <select id="installation">
+                    <option value="A">A — in conduit in an insulating wall</option>
+                    <option value="B">B — in conduit on a wall, or in trunking</option>
+                    <option value="C" selected>C — clipped direct</option>
+                    <option value="E_touching">E — perforated tray, touching</option>
+                    <option value="E_spaced_h">E — perforated tray, spaced, horizontal</option>
+                    <option value="E_spaced_v">E — perforated tray, spaced, vertical</option>
+                </select>
+            </label>
 
             <!-- Ca. These values are the keys of FACTOR_CA_PVC, exactly.
                  30 °C is the base the capacity table was measured at. -->
