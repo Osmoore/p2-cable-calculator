@@ -156,48 +156,86 @@ function evaluateVerdict(percent, limit) {
 // must stay sorted ascending.
 const STANDARD_CSA_MM2 = [1, 1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95, 120, 150, 185, 240, 300, 400];
 
-
 // Current-carrying capacity It, in amperes.
-// Source: BS 7671:2018+A2:2022, Appendix 4, Table 4D2A, Column 6
+// Source: BS 7671:2018+A2:2022, Appendix 4, Table 4D2A
 // Cable type: Multicore 70 °C thermoplastic (PVC) insulated and sheathed,
-//             non-armoured, copper conductors (1 two-core cable, single-phase)
+//             non-armoured, copper conductors.
 // Installation method: Reference Method C (clipped direct)
 // Ambient 30 °C, no grouping, no thermal insulation.
+//
+// TWO columns, because the number of loaded conductors changes the answer:
+//   Column 6 — one two-core cable, single-phase
+//   Column 7 — one three- or four-core cable, three-phase a.c.
+// Same split as Table 4D2B already has. Reading the wrong one over-states the
+// capacity for a three-phase run, which permits too small a conductor.
 const CURRENT_CAPACITY_A = {
-  1:   15,
-  1.5: 19.5,
-  2.5: 27,
-  4:   36,
-  6:   46,
-  10:  63,
-  16:  85,
-  25:  112,
-  35:  138,
-  50:  168,
-  70:  213,
-  95:  258,
-  120: 299,
-  150: 344,
-  185: 392,
-  240: 461,
-  300: 530,
-  400: 634
+  singlePhase: {
+    1:   15,
+    1.5: 19.5,
+    2.5: 27,
+    4:   36,
+    6:   46,
+    10:  63,
+    16:  85,
+    25:  112,
+    35:  138,
+    50:  168,
+    70:  213,
+    95:  258,
+    120: 299,
+    150: 344,
+    185: 392,
+    240: 461,
+    300: 530,
+    400: 634
+  },
+  threePhase: {
+    1:   13.5,
+    1.5: 17.5,
+    2.5: 24,
+    4:   32,
+    6:   41,
+    10:  57,
+    16:  76,
+    25:  96,
+    35:  119,
+    50:  144,
+    70:  184,
+    95:  223,
+    120: 259,
+    150: 299,
+    185: 341,
+    240: 403,
+    300: 464,
+    400: 557
+  }
 };
+
+// Which column this run reads. Same throw-on-unknown rule as everywhere else:
+// picking the wrong column silently would be a 10% error nobody would see.
+function getCapacityColumn(supplyType) {
+  if (supplyType === "single") {
+    return CURRENT_CAPACITY_A.singlePhase;
+  }
+  if (supplyType === "three") {
+    return CURRENT_CAPACITY_A.threePhase;
+  }
+  throw new Error("Unknown supply type: " + supplyType);
+}
 
 // The assumptions behind that table, in one place so the note and the data
 // can never disagree.
 const SIZING_BASIS =
   "BS 7671 Table 4D2A, Reference Method C, multicore 70 °C thermoplastic, copper";
 
-// Guard: capacity MUST rise with conductor size. A bigger conductor carries
-// more current, never less. If this ever fails, the wrong table has been
-// pasted in — and every size the tool recommends after that would be wrong.
-// Fail loudly here at load, not quietly on site.
-function checkCapacityTableAscends() {
+// Guard 1: capacity MUST rise with conductor size, in each column separately.
+// A bigger conductor carries more current, never less. Takes the column as an
+// argument now, so the same check runs on both without being written twice.
+function checkCapacityTableAscends(columnName, column) {
   let previous = 0;
 
   for (const size of STANDARD_CSA_MM2) {
-    const capacity = CURRENT_CAPACITY_A[size];
+    const capacity = column[size];
 
     // A size we do not stock is simply absent. Skip it, don't fail on it.
     if (capacity === undefined) {
@@ -206,13 +244,49 @@ function checkCapacityTableAscends() {
 
     if (capacity <= previous) {
       throw new Error(
-        "Capacity table is not ascending at " + size + " mm² — wrong table?");
+        columnName + " capacity is not ascending at " + size + " mm² — wrong table?");
     }
     previous = capacity;
   }
 }
 
-checkCapacityTableAscends();
+// Guard 2: the two columns must sit in the right relationship to each other.
+//
+// Three-phase must be BELOW single-phase at every size — more loaded conductors
+// in one sheath, more heat, less capacity. If the columns are ever swapped, the
+// ratio goes above 1 and this fires even though both columns are individually
+// perfect ascending tables. Same idea as the 0.866 check on Table 4D2B.
+//
+// The real band in Table 4D2A col 6 vs col 7 is 0.857 to 0.905. The window here
+// is wider, to leave room for other installation methods later without being so
+// wide that a wrong column slips through.
+function checkCapacityColumnsAgree() {
+  const single = CURRENT_CAPACITY_A.singlePhase;
+  const three = CURRENT_CAPACITY_A.threePhase;
+
+  for (const size of Object.keys(single)) {
+    if (three[size] === undefined) {
+      throw new Error("Capacity table: " + size + " mm² is missing from threePhase");
+    }
+
+    const ratio = three[size] / single[size];
+
+    if (ratio >= 1) {
+      throw new Error(
+        "Capacity " + size + " mm²: three-phase " + three[size] +
+        " A is not below single-phase " + single[size] + " A — columns swapped?");
+    }
+    if (ratio < 0.80 || ratio > 0.95) {
+      throw new Error(
+        "Capacity " + size + " mm²: three-phase ÷ single-phase is " +
+        ratio.toFixed(4) + ", expected 0.80 to 0.95");
+    }
+  }
+}
+
+checkCapacityTableAscends("singlePhase", CURRENT_CAPACITY_A.singlePhase);
+checkCapacityTableAscends("threePhase", CURRENT_CAPACITY_A.threePhase);
+checkCapacityColumnsAgree();
 
 
 // --- correction factors -----------------------------------------------------
@@ -649,7 +723,7 @@ function selectDeviceRating(designCurrent) {
 //     It_required = In / (Ca × Cg × Ci × Cf)
 // A 32 A device in conditions worth 0.6525 needs a cable TABULATED at 49.0 A,
 // because in those conditions a 49.0 A cable really only carries 32 A.
-function findSmallestCsaForCapacity(deviceRating, correctionTotal) {
+function findSmallestCsaForCapacity(deviceRating, correctionTotal, supplyType) {
   // Written as "not greater than zero" rather than "less than or equal to
   // zero" on purpose. Every comparison against NaN is false, so NaN <= 0 is
   // false and a NaN would slip straight through. !(NaN > 0) is true, so this
@@ -659,10 +733,16 @@ function findSmallestCsaForCapacity(deviceRating, correctionTotal) {
     throw new Error("Correction factor must be above zero, got " + correctionTotal);
   }
 
+  // A three-core cable carries LESS than a two-core of the same size: three
+  // loaded conductors in one sheath make more heat with nowhere to go. Reading
+  // the two-core column for a three-phase run over-states the capacity, which
+  // permits a conductor that is too small.
+  const column = getCapacityColumn(supplyType);
+
   const requiredTabulatedCurrent = deviceRating / correctionTotal;
 
   for (const candidate of STANDARD_CSA_MM2) {
-    const capacity = CURRENT_CAPACITY_A[candidate];
+    const capacity = column[candidate];
 
     if (capacity !== undefined && capacity >= requiredTabulatedCurrent) {
       return candidate;
@@ -670,7 +750,6 @@ function findSmallestCsaForCapacity(deviceRating, correctionTotal) {
   }
   return null;
 }
-
 // How much of the permitted volt drop this run actually uses, as a percentage
 // of the allowance. 2.09% against a 5% limit is 42% of the allowance — a very
 // different engineering fact from 96%, which PASS/FAIL hides completely.
@@ -914,7 +993,11 @@ form.addEventListener("submit", function (event) {
 
   } else {
     const csaForVoltDrop = findSmallestCsaForVoltDrop(supply, length, current, voltage, limit);
-    const csaForCapacity = findSmallestCsaForCapacity(deviceRating, factors.total);
+    // Which column of Table 4D2A this run reads. Two-core for single-phase,
+    // three-or-four-core for three-phase. Held in a variable because the note
+    // below quotes the same figure the search used.
+    const capacityColumn = getCapacityColumn(supply);
+    const csaForCapacity = findSmallestCsaForCapacity(deviceRating, factors.total, supply);
 
     // The binding constraint is whichever demands the bigger conductor.
     let minimumCsa = null;
@@ -940,8 +1023,8 @@ form.addEventListener("submit", function (event) {
       note =
         `Minimum ${minimumCsa} mm² — governed by ${governedBy}. ` +
         `Ib ${current} A → In ${deviceRating} A (${deviceSource}) → ` +
-        `It ${CURRENT_CAPACITY_A[minimumCsa]} A tabulated → ` +
-        `Iz ${(CURRENT_CAPACITY_A[minimumCsa] * factors.total).toFixed(1)} A here. `;
+        `It ${capacityColumn[minimumCsa]} A tabulated → ` +
+        `Iz ${(capacityColumn[minimumCsa] * factors.total).toFixed(1)} A here. `;
 
       if (csa > minimumCsa) {
         note += `You specified ${csa} mm²; ${minimumCsa} mm² satisfies both checks. `;

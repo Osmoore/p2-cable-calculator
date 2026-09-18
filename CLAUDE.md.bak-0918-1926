@@ -76,12 +76,6 @@ Neither ever guesses a default, and neither ever calculates anyway.
   factor is two places for it to drift.
 - Correction factors default to their base condition (1.00). Someone who
   ignores them gets exactly the tool that existed before they were added.
-- The capacity column is chosen by SUPPLY TYPE, never assumed. Table 4D2A
-  publishes two-core (single-phase) and three-or-four-core (three-phase)
-  columns, and a three-core cable carries LESS than a two-core of the same
-  size: three loaded conductors in one sheath make more heat with nowhere to
-  go. Reading the two-core column for a three-phase run over-states capacity
-  and permits too small a conductor.
 - The cable must satisfy BOTH capacity and volt drop. The larger minimum
   governs, and the output names which one it was.
 - A PASS is not an endorsement. Report HEADROOM (% of allowance used), not
@@ -182,21 +176,6 @@ fifth smaller than the tool had been claiming.
 
 The lesson is in the Rules above: hold both sources, show both numbers.
 
-### Correction — three-phase runs read the two-core column
-
-Found 18 Sep 2026, in the header of the capacity table itself. It read
-"1 two-core cable, single-phase", and the code then used that one column for
-every run including three-phase ones. Cases 4 and 5 and any three-phase run
-through the form were sized against a capacity figure roughly 12% too
-generous, which permits a conductor one size too small.
-
-Worked example: 63 A three-phase, 40 °C, four circuits grouped. The tool said
-25 mm². With the three-or-four-core column it says 35 mm².
-
-Same shape as the rho error: a documented assumption the code quietly ignored.
-It was caught by reading the table's own header against the code that used it,
-which is the cheapest audit available and worth doing on every table here.
-
 ## Limits
 
 | Circuit type | Limit |
@@ -215,12 +194,6 @@ Change to `<` if practice requires the drop to be strictly under.
   factor. Do not apply it again.
 - Resistivity method: the factor is applied by us (2 or 1.732).
   Tabulated method: the factor is already inside the published number.
-- Table 4D2A splits the same way Table 4D2B does, and for the same physical
-  reason: the number of loaded conductors changes the answer. Three-phase
-  capacity sits between 0.857 and 0.905 of single-phase across col 6 vs col 7,
-  and a load-time guard checks the ratio stays below 1 at every size — if the
-  columns are ever swapped it fires, even though both are individually
-  perfect ascending tables.
 - The two columns of Table 4D2B are related. Dividing three-phase by
   single-phase gives 1.732 ÷ 2 = 0.866 at every size. This is a load-time
   guard, and it catches a whole column pasted into the wrong slot even when
@@ -247,7 +220,7 @@ and Cf applied, and cross-checks volt drop against Table 4D2B. What it still
 does not know:
 
 - ONE installation method: Reference Method C (clipped direct), multicore
-  70 °C thermoplastic, copper, Table 4D2A cols 6 and 7, and Table 4D2B. The grouping
+  70 °C thermoplastic, copper, Table 4D2A col 6 and Table 4D2B. The grouping
   factor is the clipped-direct single-layer column only — a bunched or
   in-conduit run is NOT covered, and would need its own capacity column as
   well as its own Cg.
