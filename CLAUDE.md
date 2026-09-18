@@ -54,6 +54,14 @@ Neither ever guesses a default, and neither ever calculates anyway.
   shift applied across a whole row or column — to reach the last one.
 - A table with no matching partner table does not ship. It is parked in
   Domain notes with the reason.
+- Read every table's own header against the code that uses it, and ask whether
+  the code honours each condition the header names. Both defects found in the
+  week of 17 Sep 2026 were exactly that: a stated assumption nothing enforced.
+  ρ = 0.018 was documented as "copper at operating temperature" and was not.
+  The capacity table said "1 two-core cable, single-phase" and was used for
+  three-phase runs too. Neither was a logic bug — the file told the truth and
+  the code ignored it. Run this pass whenever a table is added, and over the
+  whole set periodically.
 - Where two independent sources give the same physical quantity, the tool
   holds both and shows both. Two methods agreeing is the strongest evidence
   this project can produce. Two methods disagreeing is the second strongest.
