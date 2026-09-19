@@ -59,6 +59,14 @@
 
             <label>CSA (mm²) <input type="text" id="csa"></label>
 
+            <!-- Conductor metal. The value="..." strings are exactly the keys of
+                 CONDUCTORS in script.js, so getConductor() can read them as-is. -->
+            <label>Conductor
+                <select id="material">
+                    <option value="copper">Copper</option>
+                    <option value="aluminium">Aluminium</option>
+                </select>
+            </label>
             <!-- The value="..." strings are exactly what getPhaseFactor()
                  accepts, so nothing has to be translated in between. -->
             <label>Supply

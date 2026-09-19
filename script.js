@@ -151,6 +151,27 @@ function evaluateVerdict(percent, limit) {
 }
 
 
+// One verdict from both checks. A cable must pass capacity AND volt drop;
+// listing every failure tells the person WHAT to fix, not just that it failed.
+function combineVerdicts(voltDropResult, capacityResult) {
+  const failures = [];
+
+  if (capacityResult === "FAIL") {
+    failures.push("capacity");
+  }
+  if (voltDropResult === "FAIL") {
+    failures.push("volt drop");
+  }
+
+  if (failures.length > 0) {
+    return "FAIL (" + failures.join(", ") + ")";
+  }
+  if (capacityResult === "not checked") {
+    return "PASS (volt drop only — capacity not checked)";
+  }
+  return "PASS";
+}
+
 // Standard copper conductor sizes, smallest first. Order matters: the search
 // below walks this list and stops at the first size that passes, so the list
 // must stay sorted ascending.
@@ -1446,7 +1467,7 @@ form.addEventListener("submit", function (event) {
   const csaText = document.getElementById("csa").value;
   const supply = document.getElementById("supply").value;
   const circuit = document.getElementById("circuit").value;
-  const material = "copper";  // hard-coded for now, but the page will offer a choice later
+  const material = document.getElementById("material").value;  // hard-coded for now, but the page will offer a choice later
 
   // Check every field before calculating anything. Stop at the first problem
   // found — one clear message beats a list the user has to decode.
@@ -1476,6 +1497,16 @@ form.addEventListener("submit", function (event) {
   const current = Number(currentText);
   const csa = Number(csaText);
 
+  // Each metal's tables start at its own smallest size — copper at 1 mm²,
+  // aluminium at 16 mm². Below that there is no tabulated data, so refuse
+  // rather than quietly fall back to the resistivity formula.
+  const smallestSize = getConductor(material).sizes[0];
+  if (csa < smallestSize) {
+    errorBox.textContent =
+      "BS 7671 does not tabulate " + getConductor(material).label + " below " +
+      smallestSize + " mm² — enter " + smallestSize + " mm² or larger.";
+    return;
+  }
   // Exactly the same functions the five verified cases use. The maths lives
   // in one place; the form is just another way of feeding it.
   const voltage = getSupplyVoltage(supply);
@@ -1527,6 +1558,10 @@ form.addEventListener("submit", function (event) {
     return;
   }
 
+    // Starts as "not checked" and stays that way if Ib is past the device
+  // ladder — the tool never sized the cable, so it must not claim a PASS.
+  let capacityResult = "not checked";
+
   if (deviceRating === null) {
     // Ib is past the end of the device ladder this tool knows.
     sizingNote.textContent =
@@ -1543,6 +1578,17 @@ form.addEventListener("submit", function (event) {
     // arrangement that chose the Cg table is the same one that chose the column.
     const capacityColumn = getCapacityColumn(material, factors.method, supply);
     const csaForCapacity = findSmallestCsaForCapacity(material, deviceRating, factors.total, supply, factors.method);
+    
+    
+    // Does the size the person SPECIFIED carry the current? It does if it is
+    // at least the smallest size that passed. null means nothing up to 400 mm²
+    // passed, so no size they could have typed carries it.
+    if (csaForCapacity === null || csa < csaForCapacity) {
+      capacityResult = "FAIL";
+    } else {
+      capacityResult = "PASS";
+    }
+    
     // The binding constraint is whichever demands the bigger conductor.
     let minimumCsa = null;
     let governedBy = "";
@@ -1635,11 +1681,14 @@ form.addEventListener("submit", function (event) {
     costCell = formatCedis(costPesewas);
   }
 
+  // ONE verdict for the row, from BOTH checks. Before this, the row showed
+  // the volt drop verdict alone — PASS on runs the capacity check had failed.
+  const verdict = combineVerdicts(result, capacityResult);
   const resultsBody = document.getElementById("results");
   resultsBody.innerHTML =
     `<tr><td>Your run — ${length} m, ${current} A, ${csa} mm²</td>` +
     `<td>${volts.toFixed(2)}</td><td>${percent.toFixed(2)}</td>` +
-    `<td>${result}</td><td>${costCell}</td></tr>` +
+    `<td>${verdict}</td><td>${costCell}</td></tr>` +
     resultsBody.innerHTML;
 
   // Put the cursor back in the CSA box and select what is there, so the
