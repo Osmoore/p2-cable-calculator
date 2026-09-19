@@ -62,6 +62,17 @@ Neither ever guesses a default, and neither ever calculates anyway.
   three-phase runs too. Neither was a logic bug — the file told the truth and
   the code ignored it. Run this pass whenever a table is added, and over the
   whole set periodically.
+- Everything that changes with ONE choice lives in ONE registry entry, and
+  every lookup reads from that entry. INSTALLATION_ARRANGEMENTS does this for
+  the installation (capacity column + Cg table); CONDUCTORS does it for the
+  metal (capacity table, volt drop table, ρ, ρ window, size list). The form
+  reads the choice once and passes it to every function that needs it, so a
+  run can never be sized on aluminium capacity and copper volt drop.
+- A table never travels without its size list. Copper is tabulated 1–400 mm²,
+  aluminium 16–400 mm²; each metal's guards walk its OWN list.
+- Each metal's ρ constant must sit inside the window its OWN volt drop table
+  implies. Checked at load by checkConductorsAreComplete — the 0.018 mistake
+  would now stop the page before it could calculate anything.
 - Where two independent sources give the same physical quantity, the tool
   holds both and shows both. Two methods agreeing is the strongest evidence
   this project can produce. Two methods disagreeing is the second strongest.
@@ -92,6 +103,14 @@ Neither ever guesses a default, and neither ever calculates anyway.
   and permits too small a conductor.
 - The cable must satisfy BOTH capacity and volt drop. The larger minimum
   governs, and the output names which one it was.
+- The results row carries ONE verdict built from BOTH checks
+  (combineVerdicts): PASS, FAIL (capacity), FAIL (volt drop), or
+  FAIL (capacity, volt drop). Where capacity was never checked (Ib above the
+  125 A ladder) the row says so — "PASS (volt drop only — capacity not
+  checked)" — rather than claiming a full PASS.
+- Below a metal's smallest tabulated size the page REFUSES with a message.
+  It does not fall back to the resistivity formula, because the tool would
+  then be sizing a conductor the standard does not publish.
 - A PASS is not an endorsement. Report HEADROOM (% of allowance used), not
   just a verdict — an oversized cable passes while wasting the client's money.
 - The output shows its working. A person who disagrees with the answer must
@@ -129,7 +148,8 @@ Neither ever guesses a default, and neither ever calculates anyway.
 
 Volt drop is calculated TWO ways, and both are shown.
 
-**Primary — tabulated.** BS 7671:2018+A2:2022 Table 4D2B:
+**Primary — tabulated.** BS 7671:2018+A2:2022 Table 4D2B (copper) or
+Table 4D4B (aluminium), chosen through CONDUCTORS:
 
     Vd = (mV/A/m × I × L) / 1000
 
@@ -149,6 +169,8 @@ on small cables.
     %Vd = (Vd / Vs) × 100
 
 - **ρ** = 0.022 Ω·mm²/m — copper at its 70 °C operating temperature.
+- **ρ** = 0.0365 Ω·mm²/m — aluminium at 70 °C (mean of what all 24 r cells
+  of Table 4D4B imply; range 0.0360–0.0388).
 - **factor** = 2 single-phase (go and return path)
 - **factor** = 1.732 three-phase (line-to-line)
 - **L** = one-way route length, metres
@@ -205,6 +227,26 @@ Same shape as the rho error: a documented assumption the code quietly ignored.
 It was caught by reading the table's own header against the code that used it,
 which is the cheapest audit available and worth doing on every table here.
 
+### Correction — the verdict judged volt drop only
+
+Found 19 Sep 2026, by reading a real result. 63 A three-phase, 100 m, 25 mm²,
+Method C, 40 °C, four circuits: the sizing note said "Minimum 35 mm² … You
+specified 25 mm² — that is UNDERSIZED", and the results row said PASS.
+
+Both were arithmetically true. The row's verdict came from evaluateVerdict,
+which only ever asked whether the volt drop was inside the limit (2.28% of
+5% — comfortably). The capacity check lived only in the note. 25 mm² is
+tabulated at 96 A against the 96.6 A these conditions require; in service it
+carries 62.6 A on a 63 A breaker. Anyone reading only the table would have
+installed it.
+
+Fixed the same day: capacityResult is judged beside the volt drop result and
+combineVerdicts produces the one word the row shows. Nine runs were tested
+through the form, including both-fail, off-ladder and non-standard sizes.
+
+Same family as the two corrections above: two parts of the tool each told the
+truth about their own question, and nothing made them agree.
+
 ## Limits
 
 | Circuit type | Limit |
@@ -245,6 +287,18 @@ Change to `<` if practice requires the drop to be strictly under.
   guard, and it catches a whole column pasted into the wrong slot even when
   both columns are individually perfect.
 
+- Aluminium carries about 0.77–0.82 of copper's current at the same size,
+  method and phase. A load-time guard (checkAluminiumBelowCopper) holds it to
+  0.72–0.88 at every shared size: a copper table pasted into the aluminium
+  slot reads 1.000 and stops the page.
+- The implied-ρ check on aluminium runs on BOTH columns of Table 4D4B.
+  Single-phase r carries ×2 (ρ = r × A ÷ 2000); three-phase r carries ×√3
+  (ρ = r × A ÷ 1732). 50 mm² implies 0.0388 in both columns — the table,
+  not a typo.
+- Table 4D4B three-phase 240 mm² gives z = 0.28 against √(r² + x²) = 0.286,
+  a 2.27% gap. Confirmed against the book 19 Sep 2026: it is the table's
+  rounding, and it sits inside the 2.5% tolerance.
+
 ### Parked data — supplied 17 Sep 2026, not in the code
 
 Correct tables with no matching capacity column yet. Shipping either against
@@ -258,18 +312,28 @@ are gentler than the column actually in use.
 *(The bunched Cg column was parked here from 17 to 18 Sep 2026 waiting for a
 capacity column to pair with. Methods A and B gave it one, and it now ships.)*
 
-## Known limitations — 17 Sep 2026
+## Known limitations — 19 Sep 2026
 
 The tool sizes on current-carrying capacity AND volt drop, with Ca, Cg, Ci
-and Cf applied, and cross-checks volt drop against Table 4D2B. What it still
+and Cf applied, and cross-checks volt drop against Table 4D2B or 4D4B. What it still
 does not know:
 
 - FOUR installation methods: A (conduit in an insulating wall), B (conduit on
   a wall or in trunking), C (clipped direct) and E (perforated tray, in three
   arrangements). Table 4D2A cols 2 to 9. Methods D, F and G are NOT held, nor
   is any single-core arrangement.
-- Multicore 70 °C thermoplastic, non-armoured, copper only. Armoured (SWA)
-  cable has its own tables and is not covered.
+- Multicore 70 °C thermoplastic, non-armoured. Copper 1–400 mm²
+  (Tables 4D2A/4D2B) or aluminium 16–400 mm² (Tables 4D4A/4D4B). Armoured
+  (SWA) cable has its own tables and is not covered.
+- No hand-worked aluminium verified case yet. The six verified cases are all
+  copper; aluminium is checked by the load-time guards and by hand-checked
+  form runs, not by a fixed reference case.
+- The copper guards from before 19 Sep are still hard-wired to copper
+  (checkTableCoversAllSizes, checkCapacityTableAscends,
+  checkCapacityColumnsAgree, checkMethodsRankCorrectly, checkPhaseColumnsAgree,
+  checkImpliedResistivity) and sit beside the general versions aluminium uses.
+  They work; they are duplication. Point copper at the general versions and
+  retire them.
 - Ci stops at 400 mm. A cable totally surrounded by insulation over a longer
   route is not held. Size that by hand.
 - The BS 3036 rating ladder is not held. Selecting a BS 3036 fuse requires the
@@ -281,7 +345,7 @@ does not know:
   "Mixed" applies the 3% lighting limit to the whole run, which is
   conservative — the real requirement is total drop from origin to the point
   of utilisation, budgeted across the chain.
-- Copper only. No aluminium. No XLPE.
+- No XLPE (90 °C thermosetting). Its Ca column is parked in Domain notes.
 - USD pricing is indicative: a public mid-market rate plus the user's own FX
   allowance, not a bank quotation.
 
@@ -290,19 +354,23 @@ conditions you declared.**
 
 ## Still to build — in the order chosen 17 Sep 2026
 
-1. Aluminium. One resistivity constant, one more capacity table.
-2. Earth fault loop impedance and disconnection time. Needs R1+R2 per metre
+1. Earth fault loop impedance and disconnection time. Needs R1+R2 per metre
    per size, max Zs per device type and rating, and the earthing arrangement
    as an input. Much larger than anything above it.
-3. Adiabatic check on CPC sizing. Needs k values and fault current. Pairs
-   naturally with 3 — same data, same session.
-4. Cascading runs (origin → submain → final circuit). A data-model change,
+2. Adiabatic check on CPC sizing. Needs k values and fault current. Pairs
+   naturally with 1 — same data, same session.
+3. Cascading runs (origin → submain → final circuit). A data-model change,
    not a table: the tool would hold a chain of runs and budget the total drop
    across them.
 
 Done and struck off: current-carrying capacity (16 Sep), correction factors
 Ca/Cg/Ci/Cf (17 Sep), tabulated mV/A/m cross-check (17 Sep), capacity column by
-core count (18 Sep), installation methods A/B/C/E (18 Sep).
+core count (18 Sep), installation methods A/B/C/E (18 Sep), aluminium — data
+and guards, CONDUCTORS registry, material select and 16 mm² refusal (19 Sep),
+combined capacity + volt drop verdict (19 Sep).
+
+Small jobs outstanding: an aluminium verified case; retiring the copper-only
+guard copies (see Known limitations).
 
 ## Naming — resolved 14 Sep 2026
 
