@@ -775,6 +775,231 @@ checkPhaseColumnsAgree();
 checkImpliedResistivity();
 
 
+// ============================================================================
+// ALUMINIUM — Part A: data and guards only. Nothing reads these yet.
+// Part B wires them into the sizing through a CONDUCTORS registry; until then
+// the page is still copper-only and these tables just have to load clean.
+// ============================================================================
+
+// Aluminium is not tabulated below 16 mm² in Tables 4D4A/4D4B, so it gets its
+// own size list. The copper list must NOT be used for aluminium: every copper
+// guard walks 1 → 400, and aluminium has no 1 to 10 mm² rows to walk.
+const STANDARD_CSA_AL_MM2 = [16, 25, 35, 50, 70, 95, 120, 150, 185, 240, 300, 400];
+
+// BS 7671 Table 4D4A — multicore 70 °C thermoplastic, ALUMINIUM conductors.
+// Same shape as CURRENT_CAPACITY_A: method → phase → size → amps.
+// singlePhase is the two-core column, threePhase the three/four-core column.
+const CURRENT_CAPACITY_AL_A = {
+  A: {
+    singlePhase: { 16: 44, 25: 58, 35: 71, 50: 86, 70: 108, 95: 130, 120: 150, 150: 172, 185: 195, 240: 229, 300: 263, 400: 314 },
+    threePhase:  { 16: 40, 25: 53, 35: 64, 50: 77, 70: 97, 95: 117, 120: 135, 150: 155, 185: 176, 240: 207, 300: 237, 400: 282 },
+  },
+  B: {
+    singlePhase: { 16: 53, 25: 70, 35: 86, 50: 104, 70: 131, 95: 157, 120: 182, 150: 208, 185: 236, 240: 278, 300: 319, 400: 381 },
+    threePhase:  { 16: 48, 25: 62, 35: 77, 50: 92, 70: 116, 95: 139, 120: 161, 150: 184, 185: 209, 240: 246, 300: 282, 400: 336 },
+  },
+  C: {
+    singlePhase: { 16: 66, 25: 87, 35: 107, 50: 131, 70: 166, 95: 201, 120: 233, 150: 268, 185: 306, 240: 360, 300: 413, 400: 495 },
+    threePhase:  { 16: 59, 25: 75, 35: 93, 50: 112, 70: 144, 95: 174, 120: 202, 150: 233, 185: 266, 240: 315, 300: 362, 400: 435 },
+  },
+  E: {
+    singlePhase: { 16: 73, 25: 93, 35: 115, 50: 141, 70: 181, 95: 220, 120: 256, 150: 296, 185: 339, 240: 401, 300: 463, 400: 558 },
+    threePhase:  { 16: 62, 25: 79, 35: 98, 50: 119, 70: 153, 95: 186, 120: 216, 150: 249, 185: 285, 240: 336, 300: 388, 400: 467 },
+  },
+};
+
+// BS 7671 Table 4D4B — voltage drop, mV/A/m, ALUMINIUM. Same r/x/z shape as
+// VOLTAGE_DROP_TABLE_4D2B. Worst z deviation from √(r²+x²) is 2.27% (three-
+// phase 240 mm²), inside the existing 2.5% tolerance.
+const VOLTAGE_DROP_TABLE_4D4B_AL = {
+  singlePhase: {
+    16:  { r: 4.6,   x: 0,     z: 4.6  },
+    25:  { r: 2.9,   x: 0.165, z: 2.9  },
+    35:  { r: 2.1,   x: 0.16,  z: 2.1  },
+    50:  { r: 1.55,  x: 0.155, z: 1.55 },
+    70:  { r: 1.05,  x: 0.15,  z: 1.05 },
+    95:  { r: 0.76,  x: 0.145, z: 0.77 },
+    120: { r: 0.60,  x: 0.14,  z: 0.61 },
+    150: { r: 0.48,  x: 0.14,  z: 0.50 },
+    185: { r: 0.39,  x: 0.14,  z: 0.41 },
+    240: { r: 0.30,  x: 0.135, z: 0.33 },
+    300: { r: 0.24,  x: 0.135, z: 0.27 },
+    400: { r: 0.185, x: 0.135, z: 0.23 },
+  },
+  threePhase: {
+    16:  { r: 4.0,   x: 0,     z: 4.0  },
+    25:  { r: 2.5,   x: 0.145, z: 2.5  },
+    35:  { r: 1.80,  x: 0.14,  z: 1.80 },
+    50:  { r: 1.35,  x: 0.135, z: 1.35 },
+    70:  { r: 0.91,  x: 0.13,  z: 0.92 },
+    95:  { r: 0.66,  x: 0.125, z: 0.67 },
+    120: { r: 0.52,  x: 0.125, z: 0.53 },
+    150: { r: 0.41,  x: 0.12,  z: 0.43 },
+    185: { r: 0.34,  x: 0.12,  z: 0.36 },
+    240: { r: 0.26,  x: 0.12,  z: 0.28 },
+    300: { r: 0.21,  x: 0.115, z: 0.24 },
+    400: { r: 0.160, x: 0.115, z: 0.20 },
+  },
+};
+
+// Aluminium at 70 °C is about 0.0365 Ω·mm²/m — roughly 1.66 × copper. The real
+// table implies 0.0360 to 0.0388 (50 mm² is the high one, in BOTH columns, so
+// it is the table, not a typo). The copper window 0.020–0.024 would reject
+// every row, which is why aluminium needs its own.
+const RHO_IMPLIED_AL_MIN = 0.034;
+const RHO_IMPLIED_AL_MAX = 0.040;
+
+// Aluminium carries about 0.77 to 0.82 of copper's current at the same size,
+// same method, same phase. The band is wider than that, but a copper column
+// pasted into the aluminium slot (ratio 1.00) or a column from the wrong
+// method (typically 0.6 or 1.2) lands well outside it.
+const AL_TO_CU_CAPACITY_MIN = 0.72;
+const AL_TO_CU_CAPACITY_MAX = 0.88;
+
+// The copper guards above are hard-wired to STANDARD_CSA_MM2 and to
+// CURRENT_CAPACITY_A / VOLTAGE_DROP_TABLE_4D2B. These versions take the size
+// list and the table as arguments instead. Part B points copper at them too
+// and retires the copper-only copies — one guard per rule, not one per metal.
+
+// Coverage: every size in the list has an entry. Runs first, like copper.
+function checkCoversSizes(tableName, table, sizes) {
+  for (const size of sizes) {
+    if (table[size] === undefined) {
+      throw new Error(
+        tableName + " has no entry for " + size + " mm² — " +
+        "the table and its size list disagree");
+    }
+  }
+}
+
+// Ascending: capacity rises with size. No undefined branch here — coverage
+// has already run, so there is no gap to skip.
+function checkAscendsOver(columnName, column, sizes) {
+  let previous = 0;
+  for (const size of sizes) {
+    if (!(column[size] > previous)) {
+      throw new Error(
+        columnName + " capacity is not ascending at " + size + " mm² — wrong table?");
+    }
+    previous = column[size];
+  }
+}
+
+// Three-phase below single-phase, inside the same 0.80–0.95 band as copper.
+// Real aluminium data: 0.837 to 0.914.
+function checkCapacityPhasesAgree(label, single, three, sizes) {
+  for (const size of sizes) {
+    const ratio = three[size] / single[size];
+    if (!(ratio >= 0.80 && ratio <= 0.95)) {
+      throw new Error(
+        label + " " + size + " mm²: three-phase ÷ single-phase is " +
+        ratio.toFixed(4) + ", expected 0.80 to 0.95 — columns swapped?");
+    }
+  }
+}
+
+// Methods rank A < B < C < E, same rule as copper.
+function checkMethodsRankOver(label, capacity, sizes) {
+  for (const phase of ["singlePhase", "threePhase"]) {
+    for (const size of sizes) {
+      for (let i = 1; i < CAPACITY_METHODS.length; i++) {
+        const worse = CAPACITY_METHODS[i - 1];
+        const better = CAPACITY_METHODS[i];
+        const lo = capacity[worse][phase][size];
+        const hi = capacity[better][phase][size];
+        if (!(hi > lo)) {
+          throw new Error(
+            label + " " + size + " mm² " + phase + ": method " + better +
+            " (" + hi + " A) is not above method " + worse + " (" + lo +
+            " A) — columns out of order?");
+        }
+      }
+    }
+  }
+}
+
+// Voltage drop: three-phase ÷ single-phase z near 0.866. Real aluminium data:
+// 0.848 to 0.889. Same 0.82–0.91 window as copper.
+function checkDropPhasesAgree(label, table, sizes) {
+  for (const size of sizes) {
+    const ratio = table.threePhase[size].z / table.singlePhase[size].z;
+    if (!(ratio >= 0.82 && ratio <= 0.91)) {
+      throw new Error(
+        label + " " + size + " mm²: three-phase ÷ single-phase is " +
+        ratio.toFixed(4) + ", expected about 0.866 — columns swapped?");
+    }
+  }
+}
+
+// Implied resistivity, checked on BOTH columns this time. Single-phase r
+// carries ×2 (go and return), three-phase r carries ×√3, so:
+//   single: ρ = r × A ÷ 2000        three: ρ = r × A ÷ (√3 × 1000)
+// Checking both means a typo in either r column is caught, not just one.
+function checkResistivityWindow(label, table, sizes, rhoMin, rhoMax) {
+  const divisors = { singlePhase: 2000, threePhase: Math.sqrt(3) * 1000 };
+  for (const phase of ["singlePhase", "threePhase"]) {
+    for (const size of sizes) {
+      const rho = table[phase][size].r * size / divisors[phase];
+      if (!(rho >= rhoMin && rho <= rhoMax)) {
+        throw new Error(
+          label + " " + phase + " " + size + " mm²: implies ρ = " +
+          rho.toFixed(5) + ", outside " + rhoMin + "–" + rhoMax + " — typo?");
+      }
+    }
+  }
+}
+
+// NEW, and only possible now there are two metals: aluminium must carry LESS
+// than copper at every size both tables share, inside the expected band.
+// This is the one check that catches a whole aluminium table that is
+// internally perfect but is actually copper data in the wrong slot.
+function checkAluminiumBelowCopper() {
+  for (const method of CAPACITY_METHODS) {
+    for (const phase of ["singlePhase", "threePhase"]) {
+      for (const size of STANDARD_CSA_AL_MM2) {
+        const al = CURRENT_CAPACITY_AL_A[method][phase][size];
+        const cu = CURRENT_CAPACITY_A[method][phase][size];
+        if (cu === undefined) {
+          continue; // a size copper doesn't tabulate — nothing to compare
+        }
+        const ratio = al / cu;
+        if (!(ratio >= AL_TO_CU_CAPACITY_MIN && ratio <= AL_TO_CU_CAPACITY_MAX)) {
+          throw new Error(
+            "Aluminium " + method + " " + phase + " " + size + " mm²: " + al +
+            " A is " + ratio.toFixed(3) + " × copper's " + cu + " A, expected " +
+            AL_TO_CU_CAPACITY_MIN + " to " + AL_TO_CU_CAPACITY_MAX +
+            " — copper data in the aluminium slot?");
+        }
+      }
+    }
+  }
+}
+
+// Run order: coverage first, then everything that assumes coverage.
+for (const method of CAPACITY_METHODS) {
+  const cols = CURRENT_CAPACITY_AL_A[method];
+  checkCoversSizes("Al capacity " + method + " singlePhase", cols.singlePhase, STANDARD_CSA_AL_MM2);
+  checkCoversSizes("Al capacity " + method + " threePhase", cols.threePhase, STANDARD_CSA_AL_MM2);
+  checkAscendsOver("Al " + method + " singlePhase", cols.singlePhase, STANDARD_CSA_AL_MM2);
+  checkAscendsOver("Al " + method + " threePhase", cols.threePhase, STANDARD_CSA_AL_MM2);
+  checkCapacityPhasesAgree("Al capacity " + method, cols.singlePhase, cols.threePhase, STANDARD_CSA_AL_MM2);
+}
+checkMethodsRankOver("Al capacity", CURRENT_CAPACITY_AL_A, STANDARD_CSA_AL_MM2);
+
+checkCoversSizes("Table 4D4B singlePhase", VOLTAGE_DROP_TABLE_4D4B_AL.singlePhase, STANDARD_CSA_AL_MM2);
+checkCoversSizes("Table 4D4B threePhase", VOLTAGE_DROP_TABLE_4D4B_AL.threePhase, STANDARD_CSA_AL_MM2);
+checkImpedanceModulus("Al singlePhase", VOLTAGE_DROP_TABLE_4D4B_AL.singlePhase);
+checkImpedanceModulus("Al threePhase", VOLTAGE_DROP_TABLE_4D4B_AL.threePhase);
+checkDropPhasesAgree("Table 4D4B", VOLTAGE_DROP_TABLE_4D4B_AL, STANDARD_CSA_AL_MM2);
+checkResistivityWindow("Table 4D4B", VOLTAGE_DROP_TABLE_4D4B_AL, STANDARD_CSA_AL_MM2,
+  RHO_IMPLIED_AL_MIN, RHO_IMPLIED_AL_MAX);
+
+checkAluminiumBelowCopper();
+// ============================================================================
+// End of aluminium Part A.
+// ============================================================================
+
+
 // Which column of Table 4D2B this supply uses. Same throw-on-unknown rule as
 // getPhaseFactor, and for the same reason: picking the wrong column here would
 // be a 15% error nobody would ever see.
