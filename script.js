@@ -196,8 +196,8 @@ const CURRENT_CAPACITY_A = {
 
 // Which column this run reads. Same throw-on-unknown rule as everywhere else:
 // picking the wrong column silently would be a 10% error nobody would see.
-function getCapacityColumn(method, supplyType) {
-  const columns = CURRENT_CAPACITY_A[method];
+function getCapacityColumn(material, method, supplyType) {
+  const columns = getConductor(material).capacity[method];
 
   if (columns === undefined) {
     throw new Error("Unknown installation method: " + method);
@@ -999,16 +999,99 @@ checkAluminiumBelowCopper();
 // End of aluminium Part A.
 // ============================================================================
 
+// ============================================================================
+// CONDUCTORS — one choice, every consequence. (Aluminium Part B.)
+//
+// Same idea as INSTALLATION_ARRANGEMENTS. Picking the metal changes FIVE
+// things at once: the capacity table, the volt drop table, ρ, the ρ window,
+// and the size list. If each lookup chose its own, one day one of them would
+// be left on copper while the rest moved to aluminium — a cable sized on
+// aluminium capacity and copper volt drop, and nothing on screen to say so.
+// Held together here, the five cannot disagree.
+// ============================================================================
+
+// Aluminium at 70 °C, Ω·mm²/m. The mean of what Table 4D4B implies across all
+// 24 cells (both columns) is 0.03654. Fallback only, exactly like copper: the
+// tabulated figure governs wherever the table lists the size.
+const RHO_ALUMINIUM = 0.0365;
+
+const CONDUCTORS = {
+  copper: {
+    label: "copper",
+    rho: RHO_COPPER,
+    rhoMin: RHO_IMPLIED_MIN,
+    rhoMax: RHO_IMPLIED_MAX,
+    sizes: STANDARD_CSA_MM2,
+    capacity: CURRENT_CAPACITY_A,
+    voltageDrop: VOLTAGE_DROP_TABLE_4D2B,
+    voltageDropTable: "Table 4D2B",
+    sizingBasis: SIZING_BASIS,
+  },
+  aluminium: {
+    label: "aluminium",
+    rho: RHO_ALUMINIUM,
+    rhoMin: RHO_IMPLIED_AL_MIN,
+    rhoMax: RHO_IMPLIED_AL_MAX,
+    sizes: STANDARD_CSA_AL_MM2,
+    capacity: CURRENT_CAPACITY_AL_A,
+    voltageDrop: VOLTAGE_DROP_TABLE_4D4B_AL,
+    voltageDropTable: "Table 4D4B",
+    sizingBasis: "BS 7671 Table 4D4A, multicore 70 °C thermoplastic, aluminium",
+  },
+};
+
+// Same throw-on-unknown rule as every other lookup in this file. A misspelt
+// material must stop the page, not quietly fall back to copper.
+function getConductor(material) {
+  const conductor = CONDUCTORS[material];
+
+  if (conductor === undefined) {
+    throw new Error("Unknown conductor material: " + material);
+  }
+  return conductor;
+}
+
+// Guard: every entry is complete, every entry holds every method the page
+// offers, and each ρ constant agrees with what its OWN table implies. That
+// last one is the ρ lesson made permanent: 0.018 would fail here at load.
+function checkConductorsAreComplete() {
+  const fields = ["label", "rho", "rhoMin", "rhoMax", "sizes", "capacity",
+                  "voltageDrop", "voltageDropTable", "sizingBasis"];
+
+  for (const key of Object.keys(CONDUCTORS)) {
+    const conductor = CONDUCTORS[key];
+
+    for (const field of fields) {
+      if (conductor[field] === undefined) {
+        throw new Error("Conductor " + key + " has no " + field);
+      }
+    }
+    for (const method of CAPACITY_METHODS) {
+      if (conductor.capacity[method] === undefined) {
+        throw new Error("Conductor " + key + " has no capacity for method " + method);
+      }
+    }
+    if (!(conductor.rho >= conductor.rhoMin && conductor.rho <= conductor.rhoMax)) {
+      throw new Error(
+        "Conductor " + key + ": ρ " + conductor.rho + " is outside " +
+        conductor.rhoMin + "–" + conductor.rhoMax +
+        ", the range its own volt drop table implies");
+    }
+  }
+}
+
+checkConductorsAreComplete();
+
 
 // Which column of Table 4D2B this supply uses. Same throw-on-unknown rule as
 // getPhaseFactor, and for the same reason: picking the wrong column here would
 // be a 15% error nobody would ever see.
-function getVoltageDropColumn(supplyType) {
+function getVoltageDropColumn(material, supplyType) {
   if (supplyType === "single") {
-    return VOLTAGE_DROP_TABLE_4D2B.singlePhase;
+    return getConductor(material).voltageDrop.singlePhase;
   }
   if (supplyType === "three") {
-    return VOLTAGE_DROP_TABLE_4D2B.threePhase;
+    return getConductor(material).voltageDrop.threePhase;
   }
   throw new Error("Unknown supply type: " + supplyType);
 }
@@ -1018,12 +1101,12 @@ function getVoltageDropColumn(supplyType) {
 // Returns z, not r — decided 17 Sep 2026. z includes reactance, which matters
 // from 25 mm² upward. Below that the table gives x as zero, so z and r are the
 // same number and this choice costs nothing on small cables.
-function getMilliVoltsPerAmpPerMetre(supplyType, csa) {
-  const column = getVoltageDropColumn(supplyType);
+function getMilliVoltsPerAmpPerMetre(material, supplyType, csa) {
+  const column = getVoltageDropColumn(material, supplyType);
   const row = column[csa];
 
   if (row === undefined) {
-    throw new Error("Table 4D2B has no entry for " + csa + " mm²");
+    throw new Error(getConductor(material).voltageDropTable + " has no entry for " + csa + " mm²");
   }
   return row.z;
 }
@@ -1034,8 +1117,8 @@ function getMilliVoltsPerAmpPerMetre(supplyType, csa) {
 // divide by 1000. And there is NO phase factor here — no 2, no 1.732 — because
 // the published number already contains it. Applying it again is the classic
 // way to double a volt drop and never notice.
-function calculateTabulatedVoltageDrop(supplyType, lengthMetres, current, csa) {
-  const mvPerAmpPerMetre = getMilliVoltsPerAmpPerMetre(supplyType, csa);
+function calculateTabulatedVoltageDrop(material, supplyType, lengthMetres, current, csa) {
+  const mvPerAmpPerMetre = getMilliVoltsPerAmpPerMetre(material, supplyType, csa);
 
   return (mvPerAmpPerMetre * current * lengthMetres) / 1000;
 }
@@ -1181,7 +1264,7 @@ function selectDeviceRating(designCurrent) {
 //     It_required = In / (Ca × Cg × Ci × Cf)
 // A 32 A device in conditions worth 0.6525 needs a cable TABULATED at 49.0 A,
 // because in those conditions a 49.0 A cable really only carries 32 A.
-function findSmallestCsaForCapacity(deviceRating, correctionTotal, supplyType, installationMethod) { 
+function findSmallestCsaForCapacity(material, deviceRating, correctionTotal, supplyType, installationMethod) {
 // Written as "not greater than zero" rather than "less than or equal to
   // zero" on purpose. Every comparison against NaN is false, so NaN <= 0 is
   // false and a NaN would slip straight through. !(NaN > 0) is true, so this
@@ -1195,11 +1278,11 @@ function findSmallestCsaForCapacity(deviceRating, correctionTotal, supplyType, i
   // loaded conductors in one sheath make more heat with nowhere to go. Reading
   // the two-core column for a three-phase run over-states the capacity, which
   // permits a conductor that is too small.
-  const column = getCapacityColumn(installationMethod, supplyType);
+  const column = getCapacityColumn(material, installationMethod, supplyType);
 
   const requiredTabulatedCurrent = deviceRating / correctionTotal;
 
-  for (const candidate of STANDARD_CSA_MM2) {
+  for (const candidate of getConductor(material).sizes) {
     const capacity = column[candidate];
 
     if (capacity !== undefined && capacity >= requiredTabulatedCurrent) {
@@ -1208,7 +1291,6 @@ function findSmallestCsaForCapacity(deviceRating, correctionTotal, supplyType, i
   }
   return null;
 }
- 
 // How much of the permitted volt drop this run actually uses, as a percentage
 // of the allowance. 2.09% against a 5% limit is 42% of the allowance — a very
 // different engineering fact from 96%, which PASS/FAIL hides completely.
@@ -1230,14 +1312,14 @@ function calculateHeadroomPercent(percent, limit) {
 // Returns an OBJECT, not a number, because the page has to be able to show
 // both figures. A tool that quietly picks one of two disagreeing answers is
 // hiding the disagreement, and the disagreement is the useful part.
-function calculateRunVoltageDrop(supplyType, lengthMetres, current, csa, supplyVoltage) {
-  const resistance = calculateConductorResistance(RHO_COPPER, lengthMetres, csa);
+function calculateRunVoltageDrop(material, supplyType, lengthMetres, current, csa, supplyVoltage) {
+  const resistance = calculateConductorResistance(getConductor(material).rho, lengthMetres, csa);
   const resistivityVolts =
     calculateVoltageDrop(getPhaseFactor(supplyType), resistance, current);
 
   // Is this size in the table? Every standard size is. A non-standard CSA
   // typed by hand — 3 mm², say — is not, and falls back to the formula.
-  const column = getVoltageDropColumn(supplyType);
+  const column = getVoltageDropColumn(material, supplyType);
   const isTabulated = column[csa] !== undefined;
 
   let tabulatedVolts = null;
@@ -1246,9 +1328,9 @@ function calculateRunVoltageDrop(supplyType, lengthMetres, current, csa, supplyV
 
   if (isTabulated) {
     tabulatedVolts =
-      calculateTabulatedVoltageDrop(supplyType, lengthMetres, current, csa);
+      calculateTabulatedVoltageDrop(material, supplyType, lengthMetres, current, csa);
     volts = tabulatedVolts;
-    source = "Table 4D2B";
+    source = getConductor(material).voltageDropTable;
   }
 
   return {
@@ -1264,14 +1346,14 @@ function calculateRunVoltageDrop(supplyType, lengthMetres, current, csa, supplyV
 // run, or null if nothing up to 400 mm² does.
 // NOT a recommendation — volt drop is one constraint of several, and it is
 // usually not the binding one. See Known limitations in CLAUDE.md.
-function findSmallestCsaForVoltDrop(supplyType, lengthMetres, current, supplyVoltage, limit) {
-  for (const candidate of STANDARD_CSA_MM2) {
+function findSmallestCsaForVoltDrop(material, supplyType, lengthMetres, current, supplyVoltage, limit) {
+  for (const candidate of getConductor(material).sizes) {
 
        // Exactly the same function the real calculation uses, so the size this
     // search recommends is judged by the rule the answer is judged by. If the
     // search used a different method from the verdict, the tool could recommend
     // a size and then fail it.
-    const drop = calculateRunVoltageDrop(supplyType, lengthMetres, current, candidate, supplyVoltage);
+    const drop = calculateRunVoltageDrop(material, supplyType, lengthMetres, current, candidate, supplyVoltage);
     const percent = drop.percent; 
 
     // The list is sorted smallest first, so the first size that passes IS the
@@ -1327,7 +1409,7 @@ const cases = [
 let rows = "";
 
 for (const run of cases) {
-  const resistance = calculateConductorResistance(RHO_COPPER, run.length, run.csa);
+  const resistance = calculateConductorResistance(getConductor("copper").rho, run.length, run.csa);
   const volts = calculateVoltageDrop(getPhaseFactor(run.supply), resistance, run.current);
   const percent = calculateDropPercent(volts, run.voltage);
   const result = evaluateVerdict(percent, getDropLimit(run.circuit));
@@ -1336,7 +1418,7 @@ for (const run of cases) {
   // THE CROSS-CHECK. Two independent routes to the same physical number: your
   // resistivity formula, and the figure BS 7671 publishes. They should agree.
   // Where they do not, one of them is wrong, and the gap says by how much.
-  const tabVolts = calculateTabulatedVoltageDrop(run.supply, run.length, run.current, run.csa);
+  const tabVolts = calculateTabulatedVoltageDrop("copper", run.supply, run.length, run.current, run.csa);
   const tabPercent = calculateDropPercent(tabVolts, run.voltage);
   const tabResult = evaluateVerdict(tabPercent, getDropLimit(run.circuit));
   console.log(`        ${tabVolts.toFixed(2)} V | ${tabPercent.toFixed(2)} % | ${tabResult}   tabulated 4D2B  (${describeMethodGap(volts, tabVolts)})`);
@@ -1364,7 +1446,7 @@ form.addEventListener("submit", function (event) {
   const csaText = document.getElementById("csa").value;
   const supply = document.getElementById("supply").value;
   const circuit = document.getElementById("circuit").value;
-
+  const material = "copper";  // hard-coded for now, but the page will offer a choice later
 
   // Check every field before calculating anything. Stop at the first problem
   // found — one clear message beats a list the user has to decode.
@@ -1399,7 +1481,7 @@ form.addEventListener("submit", function (event) {
   const voltage = getSupplyVoltage(supply);
   
     // Both methods in one call. Table 4D2B governs wherever it covers the size.
-  const drop = calculateRunVoltageDrop(supply, length, current, csa, voltage);
+  const drop = calculateRunVoltageDrop(material, supply, length, current, csa, voltage);
   const volts = drop.volts;
   const percent = drop.percent;
   const result = evaluateVerdict(percent, getDropLimit(circuit));
@@ -1452,15 +1534,15 @@ form.addEventListener("submit", function (event) {
       `covers (125 A). Size this run by hand.`;
 
   } else {
-    const csaForVoltDrop = findSmallestCsaForVoltDrop(supply, length, current, voltage, limit);
+    const csaForVoltDrop = findSmallestCsaForVoltDrop(material, supply, length, current, voltage, limit);
     // Which column of Table 4D2A this run reads. Two-core for single-phase,
     // three-or-four-core for three-phase. Held in a variable because the note
     // below quotes the same figure the search used.
         // "C" is hard-coded for one more step. Part C turns it into the input.
         // The method is an input now, carried on the factors object because the
     // arrangement that chose the Cg table is the same one that chose the column.
-    const capacityColumn = getCapacityColumn(factors.method, supply);
-    const csaForCapacity = findSmallestCsaForCapacity(deviceRating, factors.total, supply, factors.method);
+    const capacityColumn = getCapacityColumn(material, factors.method, supply);
+    const csaForCapacity = findSmallestCsaForCapacity(material, deviceRating, factors.total, supply, factors.method);
     // The binding constraint is whichever demands the bigger conductor.
     let minimumCsa = null;
     let governedBy = "";
@@ -1513,7 +1595,7 @@ form.addEventListener("submit", function (event) {
       `${factors.insulationMm} mm in insulation (Ci ${factors.ci}), ` +
       `${deviceWords} (Cf ${factors.cf}) ` +
       `→ combined ${factors.total.toFixed(3)}. ` +
-      `Sized on ${factors.arrangementLabel}, ${SIZING_BASIS}.`;
+      `Sized on ${factors.arrangementLabel}, ${getConductor(material).sizingBasis}.`;
     sizingNote.textContent = note;
   }
 
