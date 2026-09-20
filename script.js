@@ -1419,18 +1419,19 @@ function describeNumberProblem(text, fieldName) {
 
 // Every case, as data
 const cases = [
-  { name: "Case 1", length: 25,  current: 32, csa: 6,   supply: "single", voltage: 230, circuit: "power" },
-  { name: "Case 2", length: 35,  current: 45, csa: 10,  supply: "single", voltage: 230, circuit: "power" },
-  { name: "Case 3", length: 70,  current: 32, csa: 2.5, supply: "single", voltage: 230, circuit: "lighting" },
-  { name: "Case 4", length: 100, current: 20, csa: 10,  supply: "three",  voltage: 415, circuit: "power" },
-  { name: "Case 5", length: 150, current: 10, csa: 10,  supply: "three",  voltage: 415, circuit: "power" },
-  { name: "Case 6", length: 200, current: 15, csa: 16,  supply: "single", voltage: 230, circuit: "power" },
+  { name: "Case 1", length: 25,  current: 32, csa: 6,   supply: "single", voltage: 230, material: "copper", circuit: "power" },
+  { name: "Case 2", length: 35,  current: 45, csa: 10,  supply: "single", voltage: 230, material: "copper", circuit: "power" },
+  { name: "Case 3", length: 70,  current: 32, csa: 2.5, supply: "single", voltage: 230, material: "copper", circuit: "lighting" },
+  { name: "Case 4", length: 100, current: 20, csa: 10,  supply: "three",  voltage: 415, material: "copper", circuit: "power" },
+  { name: "Case 5", length: 150, current: 10, csa: 10,  supply: "three",  voltage: 415, material: "copper", circuit: "power" },
+  { name: "Case 6", length: 200, current: 15, csa: 16,  supply: "single", voltage: 230, material: "copper", circuit: "power" },
+  { name: "Case 7", length: 80,  current: 100, csa: 70, supply: "three",  voltage: 415, material: "aluminium", circuit: "power" },
 ];
 
 let rows = "";
 
 for (const run of cases) {
-  const resistance = calculateConductorResistance(getConductor("copper").rho, run.length, run.csa);
+  const resistance = calculateConductorResistance(getConductor(run.material).rho, run.length, run.csa);
   const volts = calculateVoltageDrop(getPhaseFactor(run.supply), resistance, run.current);
   const percent = calculateDropPercent(volts, run.voltage);
   const result = evaluateVerdict(percent, getDropLimit(run.circuit));
@@ -1439,10 +1440,10 @@ for (const run of cases) {
   // THE CROSS-CHECK. Two independent routes to the same physical number: your
   // resistivity formula, and the figure BS 7671 publishes. They should agree.
   // Where they do not, one of them is wrong, and the gap says by how much.
-  const tabVolts = calculateTabulatedVoltageDrop("copper", run.supply, run.length, run.current, run.csa);
+  const tabVolts = calculateTabulatedVoltageDrop(run.material, run.supply, run.length, run.current, run.csa);
   const tabPercent = calculateDropPercent(tabVolts, run.voltage);
   const tabResult = evaluateVerdict(tabPercent, getDropLimit(run.circuit));
-  console.log(`        ${tabVolts.toFixed(2)} V | ${tabPercent.toFixed(2)} % | ${tabResult}   tabulated 4D2B  (${describeMethodGap(volts, tabVolts)})`);
+  console.log(`        ${tabVolts.toFixed(2)} V | ${tabPercent.toFixed(2)} % | ${tabResult}   ${getConductor(run.material).voltageDropTable}  (${describeMethodGap(volts, tabVolts)})`);
     // The TABULATED figure goes in the table, because that is now what governs.
   // The console above still shows both, which is where the cross-check lives.
   // One basis for every row: a table mixing two methods is a table nobody can
