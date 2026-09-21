@@ -84,6 +84,37 @@
                 </select>
             </label>
 
+            <!-- Earth fault loop. Four inputs, because Zs needs the supply
+                 (Ze and the earthing arrangement), the circuit (the CPC and
+                 its metal) and the device (which curve it follows). -->
+            <label>Earthing arrangement
+                <select id="earthing">
+                    <option value="TN_C_S">TN-C-S (PME)</option>
+                    <option value="TN_S">TN-S</option>
+                    <option value="TT">TT (not checked — needs RCD rule)</option>
+                </select>
+            </label>
+
+            <label>Ze (Ω, optional — measured at the origin)
+                <input type="text" id="ze"></label>
+
+            <label>Device curve
+                <select id="mcb-curve">
+                    <option value="B">Type B — Ia 5 x In</option>
+                    <option value="C">Type C — Ia 10 x In</option>
+                    <option value="D">Type D — Ia 20 x In</option>
+                </select>
+            </label>
+
+            <label>CPC size (mm²) <input type="text" id="cpc" value="2.5"></label>
+
+            <label>CPC metal
+                <select id="cpc-material">
+                    <option value="copper">Copper</option>
+                    <option value="aluminium">Aluminium</option>
+                </select>
+            </label>
+
             <!-- Installation conditions. The capacity table above holds ONE
                  set of conditions: 30 °C ambient, one circuit, no insulation,
                  an MCB. These four selects say how far this run differs from

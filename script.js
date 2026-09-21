@@ -153,7 +153,7 @@ function evaluateVerdict(percent, limit) {
 
 // One verdict from both checks. A cable must pass capacity AND volt drop;
 // listing every failure tells the person WHAT to fix, not just that it failed.
-function combineVerdicts(voltDropResult, capacityResult) {
+function combineVerdicts(voltDropResult, capacityResult, zsResult) {
   const failures = [];
 
   if (capacityResult === "FAIL") {
@@ -162,12 +162,24 @@ function combineVerdicts(voltDropResult, capacityResult) {
   if (voltDropResult === "FAIL") {
     failures.push("volt drop");
   }
+  
+    if (zsResult === "FAIL") {
+    failures.push("Zs");
+  }
 
   if (failures.length > 0) {
     return "FAIL (" + failures.join(", ") + ")";
   }
+    const unchecked = [];
+
   if (capacityResult === "not checked") {
-    return "PASS (volt drop only — capacity not checked)";
+    unchecked.push("capacity");
+  }
+  if (zsResult === "not checked") {
+    unchecked.push("Zs");
+  }
+  if (unchecked.length > 0) {
+    return "PASS (" + unchecked.join(" and ") + " not checked)";
   }
   return "PASS";
 }
@@ -1870,7 +1882,12 @@ form.addEventListener("submit", function (event) {
   const csaText = document.getElementById("csa").value;
   const supply = document.getElementById("supply").value;
   const circuit = document.getElementById("circuit").value;
-  const material = document.getElementById("material").value;  // hard-coded for now, but the page will offer a choice later
+  const material = document.getElementById("material").value;
+  const earthing = document.getElementById("earthing").value;
+  const zeText = document.getElementById("ze").value;
+  const curve = document.getElementById("mcb-curve").value;
+  const cpcText = document.getElementById("cpc").value;
+  const cpcMaterial = document.getElementById("cpc-material").value;
 
   // Check every field before calculating anything. Stop at the first problem
   // found — one clear message beats a list the user has to decode.
@@ -1910,6 +1927,35 @@ form.addEventListener("submit", function (event) {
       smallestSize + " mm² — enter " + smallestSize + " mm² or larger.";
     return;
   }
+
+
+  // The CPC is half the earth fault loop, so it is validated like any other
+  // electrical input and named in the message when it is wrong.
+  const cpcProblem = describeNumberProblem(cpcText, "CPC size");
+
+  if (cpcProblem !== "") {
+    errorBox.textContent = cpcProblem;
+    return;
+  }
+
+  const cpcSize = Number(cpcText);
+
+  if (RESISTANCE_PER_METRE_20C[cpcMaterial][cpcSize] === undefined) {
+    errorBox.textContent =
+      cpcMaterial + " is not tabulated at " + cpcSize + " mm² — " +
+      "choose a standard size.";
+    return;
+  }
+
+  if (zeText.trim() !== "") {
+    const zeProblem = describeNumberProblem(zeText, "Ze");
+
+    if (zeProblem !== "") {
+      errorBox.textContent = zeProblem;
+      return;
+    }
+  }
+
   // Exactly the same functions the five verified cases use. The maths lives
   // in one place; the form is just another way of feeding it.
   const voltage = getSupplyVoltage(supply);
@@ -1964,6 +2010,10 @@ form.addEventListener("submit", function (event) {
     // Starts as "not checked" and stays that way if Ib is past the device
   // ladder — the tool never sized the cable, so it must not claim a PASS.
   let capacityResult = "not checked";
+ 
+  // Same rule as capacity: "not checked" until something checks it, so an
+  // unchecked circuit can never be reported as a pass.
+  let zsResult = "not checked";
 
   if (deviceRating === null) {
     // Ib is past the end of the device ladder this tool knows.
@@ -2045,6 +2095,47 @@ form.addEventListener("submit", function (event) {
       `${deviceWords} (Cf ${factors.cf}) ` +
       `→ combined ${factors.total.toFixed(3)}. ` +
       `Sized on ${factors.arrangementLabel}, ${getConductor(material).sizingBasis}.`;
+          // --- earth fault loop ----------------------------------------------
+    // Ib <= In <= Iz says the cable will not overheat. It says nothing about
+    // whether a fault to earth will trip the device fast enough — that is Zs,
+    // and it is a separate question with a separate answer.
+    const system = getEarthingSystem(earthing);
+
+    if (system.supported === false) {
+      note += ` Earth fault loop NOT checked — ${system.refusal}`;
+
+    } else if (factors.deviceType === "bs3036") {
+      note += ` Earth fault loop NOT checked — a BS 3036 fuse has no fixed ` +
+              `Ia multiple; its disconnection time comes from a time/current ` +
+              `curve this tool does not hold.`;
+
+    } else {
+      // An empty Ze box uses the arrangement's typical figure, and the note
+      // says ASSUMED. Ze is a measurement, not a constant: a number nobody
+      // measured should never be presented as one that was.
+      let ze = system.typicalZe;
+      let zeSource = "assumed";
+
+      if (zeText.trim() !== "") {
+        ze = Number(zeText);
+        zeSource = "measured";
+      }
+
+      const loop = calculateZs(
+        material, cpcMaterial, csa, cpcSize, length, ze, curve, deviceRating);
+
+      zsResult = loop.passes ? "PASS" : "FAIL";
+
+      note +=
+        ` Earth fault loop: Ze ${loop.ze} Ω (${zeSource}, ${system.code}) + ` +
+        `${length} m of ${csa}/${cpcSize} mm² ` +
+        `(R1+R2 ${loop.r1PlusR2PerMetre.toFixed(2)} mΩ/m × ` +
+        `${loop.temperatureFactor} = ${loop.circuitOhms.toFixed(3)} Ω) ` +
+        `→ Zs ${loop.zs.toFixed(3)} Ω against ${loop.maxZs.toFixed(2)} Ω ` +
+        `for a ${deviceRating} A ${getDeviceType(curve).label} — ` +
+        `${zsResult}. On site the meter must read ` +
+        `${loop.measuredMaxZs.toFixed(2)} Ω or less.`;
+    }
     sizingNote.textContent = note;
   }
 
@@ -2086,7 +2177,7 @@ form.addEventListener("submit", function (event) {
 
   // ONE verdict for the row, from BOTH checks. Before this, the row showed
   // the volt drop verdict alone — PASS on runs the capacity check had failed.
-  const verdict = combineVerdicts(result, capacityResult);
+  const verdict = combineVerdicts(result, capacityResult, zsResult);
   const resultsBody = document.getElementById("results");
   resultsBody.innerHTML =
     `<tr><td>Your run — ${length} m, ${current} A, ${csa} mm²</td>` +
