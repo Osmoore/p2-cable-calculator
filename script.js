@@ -1648,6 +1648,72 @@ checkSeparateCpcBeatsInCable();
 // ============================================================================
 
 
+// The prospective earth fault current, in amperes: I = U0 ÷ Zs.
+//
+// The same Zs the loop check produced, so the two answers cannot be based on
+// different circuits. A low Zs is GOOD for disconnection and HARD on the CPC:
+// the closer the supply, the more current a fault draws through it.
+function calculateEarthFaultCurrent(zsOhms) {
+  if (!(zsOhms > 0)) {
+    throw new Error("Zs must be above zero, got " + zsOhms);
+  }
+  return NOMINAL_U0_VOLTS / zsOhms;
+}
+
+// The smallest CPC that survives the fault, in mm²:
+//
+//     S = √(I² × t) ÷ k
+//
+// This is the adiabatic equation: "adiabatic" because it assumes ALL the heat
+// stays in the conductor for the duration of the fault — none escapes into the
+// insulation or the air. That is pessimistic, deliberately: a fault is over
+// long before heat has time to go anywhere.
+//
+// It returns a raw size, not a standard one. The caller compares it with the
+// CPC actually installed; rounding up to a standard size is a separate step.
+function calculateAdiabaticCsa(faultCurrentA, timeSeconds, k) {
+  if (!(faultCurrentA > 0)) {
+    throw new Error("Fault current must be above zero, got " + faultCurrentA);
+  }
+  if (!(timeSeconds > 0)) {
+    throw new Error("Disconnection time must be above zero, got " + timeSeconds);
+  }
+  if (!(k > 0)) {
+    throw new Error("k must be above zero, got " + k);
+  }
+  return Math.sqrt(faultCurrentA * faultCurrentA * timeSeconds) / k;
+}
+
+// The let-through energy the INSTALLED CPC can take, in A²s: rearranging the
+// same equation for I²t gives (k × S)².
+//
+// This is the number that resolves a failure. When the tool says a 2.5 mm² CPC
+// is too small at t = 0.1 s, it is really saying "this fault delivers more
+// energy than 2.5 mm² can absorb" — and the breaker's published let-through
+// energy is usually far lower than the assumption, because a real device
+// current-limits instead of holding the fault for a tenth of a second.
+function calculateLetThroughCapacity(csa, k) {
+  return (k * csa) * (k * csa);
+}
+
+// Does the CPC survive? Returns the working, not a verdict — same rule as
+// calculateZs: the page has to be able to show which number to argue with.
+function evaluateAdiabatic(zsOhms, timeSeconds, cpcTypeCode, cpcCsa) {
+  const cpcType = getCpcType(cpcTypeCode);
+  const faultCurrent = calculateEarthFaultCurrent(zsOhms);
+  const requiredCsa = calculateAdiabaticCsa(faultCurrent, timeSeconds, cpcType.k);
+
+  return {
+    faultCurrent: faultCurrent,
+    timeSeconds: timeSeconds,
+    k: cpcType.k,
+    cpcLabel: cpcType.label,
+    requiredCsa: requiredCsa,
+    installedCsa: cpcCsa,
+    letThroughLimit: calculateLetThroughCapacity(cpcCsa, cpcType.k),
+    passes: cpcCsa >= requiredCsa
+  };
+}
 // One resistance, at 20 °C, in mΩ per metre. A lookup, so it THROWS on a size
 // the metal is not tabulated in — the same rule as every other lookup here.
 // A person typing an impossible CPC size is caught on the page, before this.
