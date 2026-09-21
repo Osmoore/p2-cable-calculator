@@ -1278,6 +1278,344 @@ function selectDeviceRating(designCurrent) {
   return null;  // past the end of the ladder this tool covers
 }
 
+
+// ============================================================================
+// EARTH FAULT LOOP IMPEDANCE — Part A: data and guards only.
+// Nothing reads these yet. Part B does the calculation, Part C the page.
+// ============================================================================
+
+// U0 — the nominal voltage line to EARTH, not line to line. 230 V on both a
+// single-phase supply and a 415 V three-phase one, because a fault to earth
+// is a line-to-earth event on one phase. Never use 415 here.
+const NOMINAL_U0_VOLTS = 230;
+
+// The voltage factor applied to the Zs limits.
+//
+// 1.00 because that is what the book in use prints: Table 41.3 gives 7.67 Ω
+// at 6 A, 1.44 Ω at 32 A and 0.73 Ω at 63 A for Type B, which is exactly
+// U0 ÷ (5 × In) with no factor applied. Read from the printed table and
+// confirmed 21 Sep 2026.
+//
+// KEPT AS A CONSTANT ON PURPOSE. BS 7671:2018+A2:2022 is understood to apply
+// Cmin = 0.95, which would make every limit here about 5% lower — 1.37 Ω at
+// 32 A rather than 1.44 Ω. Lower is the SAFER figure. If a later check of the
+// amendment shows the 0.95 basis applies to this installation, this one line
+// changes and all 39 limits move together.
+const CMIN = 1.00;
+
+// The measured-value rule of thumb: an instrument reading taken at ambient
+// temperature must not exceed 0.8 × the tabulated limit, because the tabulated
+// limit is for a conductor at its operating temperature, which is hotter and
+// therefore higher-resistance than the one being tested.
+const MEASURED_ZS_FACTOR = 0.8;
+
+// (R1 + R2) is tabulated at 20 °C; a fault happens with the cable already at
+// its operating temperature. 1.20 is the multiplier for 70 °C thermoplastic.
+// It belongs to the INSULATION, not to the metal — 90 °C thermosetting (XLPE)
+// has a different figure, and XLPE is still parked. One insulation, one value,
+// said out loud rather than buried in the arithmetic.
+const FAULT_TEMPERATURE_FACTOR = 1.20;
+
+// The device types this tool holds, and what makes them different: the
+// multiple of In at which the magnetic trip operates instantaneously.
+//
+// One entry, both consequences — the multiplier and the label travel together,
+// so a type can never be added with a name but no Ia.
+//
+// Each figure is the TOP of the published band (B is 3–5, C is 5–10,
+// D is 10–20). The top of the band is the conservative choice: it is the
+// worst case the breaker is permitted to need before it trips.
+const DEVICE_TYPES = {
+  B: { iaMultiplier: 5,  label: "Type B MCB / RCBO" },
+  C: { iaMultiplier: 10, label: "Type C MCB / RCBO" },
+  D: { iaMultiplier: 20, label: "Type D MCB / RCBO" },
+};
+
+function getDeviceType(typeCode) {
+  const deviceType = DEVICE_TYPES[typeCode];
+
+  if (deviceType === undefined) {
+    throw new Error("Unknown device type: " + typeCode);
+  }
+  return deviceType;
+}
+
+// The maximum Zs for one device, in ohms. COMPUTED, not looked up.
+//
+//     Zs_max = (CMIN × U0) ÷ (Ia multiplier × In)
+//
+// Computing it rather than storing 39 numbers means: no rating can be missing,
+// no limit can be rounded the wrong way, and the safety basis is one line a
+// person can argue with instead of a number buried in a table.
+function calculateMaxZs(typeCode, deviceRating) {
+  if (!(deviceRating > 0)) {
+    throw new Error("Device rating must be above zero, got " + deviceRating);
+  }
+  const ia = getDeviceType(typeCode).iaMultiplier * deviceRating;
+
+  return (CMIN * NOMINAL_U0_VOLTS) / ia;
+}
+
+// The published table, held ONLY to check the formula against. Nothing reads
+// these values in a calculation — they are the second source, exactly as
+// Table 4D2B was the second source for ρ.
+// BS 7671:2018+A2:2022 Table 41.3, transcribed 21 Sep 2026.
+const SUPPLIED_MAX_ZS_41_3 = {
+  B: { 3: 15.33, 6: 7.67, 10: 4.60, 16: 2.87, 20: 2.30, 25: 1.84, 32: 1.44,
+       40: 1.15, 50: 0.92, 63: 0.73, 80: 0.57, 100: 0.46, 125: 0.37 },
+  C: { 3: 7.67, 6: 3.83, 10: 2.30, 16: 1.44, 20: 1.15, 25: 0.92, 32: 0.72,
+       40: 0.57, 50: 0.46, 63: 0.36, 80: 0.29, 100: 0.23, 125: 0.18 },
+  D: { 3: 3.83, 6: 1.92, 10: 1.15, 16: 0.72, 20: 0.57, 25: 0.46, 32: 0.36,
+       40: 0.29, 50: 0.23, 63: 0.18, 80: 0.14, 100: 0.11, 125: 0.09 },
+};
+
+// The table is printed to two decimal places, so a value may sit half a unit
+// in the last place away from the exact figure — 0.005. The published 63 A
+// Type C value is rounded DOWN from 0.3651 to 0.36, which is 0.0051 away, so
+// the tolerance is 0.006. Anything further apart is not rounding.
+const ZS_TABLE_TOLERANCE_OHMS = 0.006;
+
+// Guard 1: the formula must reproduce the published table at every rating of
+// every type. 39 independent checks on one line of arithmetic. If CMIN is ever
+// changed without the table being changed too, all 39 fail at once — which is
+// the intention: the two must move together or be argued about.
+function checkMaxZsMatchesPublishedTable() {
+  for (const typeCode of Object.keys(SUPPLIED_MAX_ZS_41_3)) {
+    const published = SUPPLIED_MAX_ZS_41_3[typeCode];
+
+    for (const rating of Object.keys(published)) {
+      const computed = calculateMaxZs(typeCode, Number(rating));
+      const gap = Math.abs(computed - published[rating]);
+
+      if (gap > ZS_TABLE_TOLERANCE_OHMS) {
+        throw new Error(
+          "Zs Type " + typeCode + " " + rating + " A: formula gives " +
+          computed.toFixed(4) + " but Table 41.3 prints " + published[rating] +
+          " — the formula and the table disagree");
+      }
+    }
+  }
+}
+
+// Guard 2: every rating this tool can select must have a limit. The device
+// ladder and the Zs data have to agree about which devices exist, the same
+// rule as the capacity tables and the size lists.
+function checkZsCoversDeviceLadder() {
+  for (const typeCode of Object.keys(DEVICE_TYPES)) {
+    for (const rating of STANDARD_DEVICE_RATINGS_A) {
+      const limit = calculateMaxZs(typeCode, rating);
+
+      if (!(limit > 0)) {
+        throw new Error(
+          "Zs Type " + typeCode + " " + rating + " A: no usable limit");
+      }
+      if (SUPPLIED_MAX_ZS_41_3[typeCode][rating] === undefined) {
+        throw new Error(
+          "Zs Type " + typeCode + ": the device ladder offers " + rating +
+          " A but Table 41.3 as transcribed has no such row");
+      }
+    }
+  }
+}
+
+// Guard 3: the types must rank D < C < B at every rating. A bigger Ia needs a
+// lower impedance to reach it, so a Type D limit is always the tightest. This
+// catches two type tables swapped even when each is internally perfect.
+function checkDeviceTypesRankCorrectly() {
+  for (const rating of STANDARD_DEVICE_RATINGS_A) {
+    const b = calculateMaxZs("B", rating);
+    const c = calculateMaxZs("C", rating);
+    const d = calculateMaxZs("D", rating);
+
+    if (!(d < c && c < b)) {
+      throw new Error(
+        "Zs " + rating + " A: expected D < C < B, got " + d.toFixed(3) +
+        ", " + c.toFixed(3) + ", " + b.toFixed(3));
+    }
+  }
+}
+
+// Conductor resistance at 20 °C, in mΩ per metre.
+// Source: IET On-Site Guide Table I1 / BS 7671 Appendix 3, supplied 21 Sep 2026.
+//
+// R1 + R2 is NOT stored. It is r1 + r2, added when needed: storing the sums
+// would be the same numbers twice, and any combination of line and CPC size
+// works rather than only the pairs somebody listed.
+const RESISTANCE_PER_METRE_20C = {
+  copper: {
+    1: 18.10, 1.5: 12.10, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15,
+    25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153,
+    150: 0.124, 185: 0.0991, 240: 0.0754, 300: 0.0601, 400: 0.0470,
+  },
+  aluminium: {
+    16: 1.91, 25: 1.20, 35: 0.868, 50: 0.641, 70: 0.443, 95: 0.320,
+    120: 0.253, 150: 0.206, 185: 0.164, 240: 0.125, 300: 0.100, 400: 0.0778,
+  },
+};
+
+// The resistivity these figures imply at 20 °C, in Ω·mm²/m ÷ 1000. Copper
+// lands near 18.3 and aluminium near 30.4. The windows are wide enough for
+// the real scatter between stranding classes and tight enough to catch a
+// misplaced decimal point.
+const RHO_20C_WINDOWS = {
+  copper: { min: 17.5, max: 19.5 },
+  aluminium: { min: 29.0, max: 33.0 },
+};
+
+// How closely the 20 °C table, warmed by FAULT_TEMPERATURE_FACTOR, has to
+// agree with the 70 °C ρ already in CONDUCTORS. Checked on the MEAN, because
+// individual sizes scatter by a few percent but the whole column cannot.
+const RHO_CROSS_CHECK_PERCENT = 3.0;
+
+// Guard 4: coverage. Each metal's resistance table must hold every size that
+// metal is tabulated in — the same size list its capacity table walks.
+function checkResistanceCoversSizes() {
+  for (const material of Object.keys(RESISTANCE_PER_METRE_20C)) {
+    checkCoversSizes(
+      "resistance at 20 °C, " + material,
+      RESISTANCE_PER_METRE_20C[material],
+      getConductor(material).sizes);
+  }
+}
+
+// Guard 5: resistance must FALL as the conductor gets bigger, and the
+// resistivity each row implies must sit inside its metal's window.
+function checkResistanceFallsAndIsSensible() {
+  for (const material of Object.keys(RESISTANCE_PER_METRE_20C)) {
+    const table = RESISTANCE_PER_METRE_20C[material];
+    const window = RHO_20C_WINDOWS[material];
+    let previous = Infinity;
+
+    for (const size of getConductor(material).sizes) {
+      if (!(table[size] < previous)) {
+        throw new Error(
+          "Resistance " + material + " " + size + " mm²: " + table[size] +
+          " mΩ/m is not below the smaller size — wrong table?");
+      }
+      previous = table[size];
+
+      const rho20 = table[size] * size;
+
+      if (!(rho20 >= window.min && rho20 <= window.max)) {
+        throw new Error(
+          "Resistance " + material + " " + size + " mm²: implies ρ at 20 °C = " +
+          rho20.toFixed(2) + ", outside " + window.min + "–" + window.max +
+          " — typo?");
+      }
+    }
+  }
+}
+
+// Guard 6: the two temperatures must describe the same metal.
+//
+// This is the strongest check in the set, and the reason it exists is that it
+// already paid: the 20 °C table came from the On-Site Guide, ρ at 70 °C came
+// from Table 4D2B weeks earlier, and 18.3 × 1.2 = 21.96 against 22.0 for
+// copper — two unrelated sources agreeing to within half a percent. An error
+// in either one breaks that agreement.
+function checkResistanceAgreesWithOperatingRho() {
+  for (const material of Object.keys(RESISTANCE_PER_METRE_20C)) {
+    const table = RESISTANCE_PER_METRE_20C[material];
+    const sizes = getConductor(material).sizes;
+    let total = 0;
+
+    for (const size of sizes) {
+      total += table[size] * size;
+    }
+
+    const meanRho20 = total / sizes.length;
+    const warmed = meanRho20 * FAULT_TEMPERATURE_FACTOR / 1000;
+    const operating = getConductor(material).rho;
+    const deviation = Math.abs(warmed - operating) / operating * 100;
+
+    if (deviation > RHO_CROSS_CHECK_PERCENT) {
+      throw new Error(
+        "Resistance " + material + ": 20 °C table warmed by " +
+        FAULT_TEMPERATURE_FACTOR + " implies ρ = " + warmed.toFixed(5) +
+        ", but CONDUCTORS holds " + operating + " — " +
+        deviation.toFixed(1) + "% apart");
+    }
+  }
+}
+
+// The earthing arrangements, and what each one means for this check.
+//
+// supported:false is a REFUSAL, not a gap. On a TT system the disconnection
+// requirement is met by an RCD (RA × IΔn ≤ 50 V), not by the breaker's Zs
+// limit. Judging a TT installation against a Type B Zs limit would fail
+// nearly every real one and teach the user to ignore the tool.
+//
+// The Ze figures are UK DNO DESIGN LIMITS. On ECG's network they are a
+// starting assumption and nothing more: Ze is measured at the origin, and the
+// output says whether the figure used was measured or assumed.
+const EARTHING_SYSTEMS = {
+  TN_S: {
+    code: "TN-S",
+    label: "TN-S — separate earth conductor back to the transformer",
+    typicalZe: 0.80,
+    supported: true,
+    refusal: "",
+  },
+  TN_C_S: {
+    code: "TN-C-S",
+    label: "TN-C-S (PME) — combined neutral and earth on the supply network",
+    typicalZe: 0.35,
+    supported: true,
+    refusal: "",
+  },
+  TT: {
+    code: "TT",
+    label: "TT — earth electrode installation",
+    typicalZe: 21.0,
+    supported: false,
+    refusal: "TT relies on an RCD, not on the breaker's Zs limit " +
+             "(RA × IΔn ≤ 50 V). This tool does not hold that check yet — " +
+             "size the earth electrode and RCD by hand.",
+  },
+};
+
+function getEarthingSystem(code) {
+  const system = EARTHING_SYSTEMS[code];
+
+  if (system === undefined) {
+    throw new Error("Unknown earthing arrangement: " + code);
+  }
+  return system;
+}
+
+// Guard 7: every arrangement is complete, and an unsupported one carries the
+// message that will be shown. A refusal with no words is a dead end.
+function checkEarthingSystemsAreComplete() {
+  for (const key of Object.keys(EARTHING_SYSTEMS)) {
+    const system = EARTHING_SYSTEMS[key];
+
+    for (const field of ["code", "label", "typicalZe", "supported", "refusal"]) {
+      if (system[field] === undefined) {
+        throw new Error("Earthing arrangement " + key + " has no " + field);
+      }
+    }
+    if (!(system.typicalZe > 0)) {
+      throw new Error(
+        "Earthing arrangement " + key + ": typical Ze must be above zero");
+    }
+    if (system.supported === false && system.refusal === "") {
+      throw new Error(
+        "Earthing arrangement " + key + " is unsupported but has no message");
+    }
+  }
+}
+
+checkMaxZsMatchesPublishedTable();
+checkZsCoversDeviceLadder();
+checkDeviceTypesRankCorrectly();
+checkResistanceCoversSizes();
+checkResistanceFallsAndIsSensible();
+checkResistanceAgreesWithOperatingRho();
+checkEarthingSystemsAreComplete();
+// ============================================================================
+// End of earth fault loop impedance Part A.
+// ============================================================================
+
 // The smallest listed size that can carry the device rating ONCE the
 // installation conditions are accounted for.
 //
