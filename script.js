@@ -150,10 +150,9 @@ function evaluateVerdict(percent, limit) {
   }
 }
 
-
 // One verdict from both checks. A cable must pass capacity AND volt drop;
 // listing every failure tells the person WHAT to fix, not just that it failed.
-function combineVerdicts(voltDropResult, capacityResult, zsResult) {
+function combineVerdicts(voltDropResult, capacityResult, zsResult , adiabaticResult) {
   const failures = [];
 
   if (capacityResult === "FAIL") {
@@ -167,6 +166,12 @@ function combineVerdicts(voltDropResult, capacityResult, zsResult) {
     failures.push("Zs");
   }
 
+    // The basis is named, because at high fault currents the 0.1 s assumption is
+  // doing the work and the person needs to know which number to look up.
+  if (adiabaticResult !== "PASS" && adiabaticResult !== "not checked") {
+    failures.push("adiabatic " + adiabaticResult);
+  }
+
   if (failures.length > 0) {
     return "FAIL (" + failures.join(", ") + ")";
   }
@@ -177,6 +182,9 @@ function combineVerdicts(voltDropResult, capacityResult, zsResult) {
   }
   if (zsResult === "not checked") {
     unchecked.push("Zs");
+  }
+  if (adiabaticResult === "not checked") {
+    unchecked.push("adiabatic");
   }
   if (unchecked.length > 0) {
     return "PASS (" + unchecked.join(" and ") + " not checked)";
@@ -1973,6 +1981,8 @@ form.addEventListener("submit", function (event) {
   const curve = document.getElementById("mcb-curve").value;
   const cpcText = document.getElementById("cpc").value;
   const cpcMaterial = document.getElementById("cpc-material").value;
+  const cpcType = document.getElementById("cpc-type").value;
+  const timeText = document.getElementById("disconnect-time").value;
 
   // Check every field before calculating anything. Stop at the first problem
   // found — one clear message beats a list the user has to decode.
@@ -2040,12 +2050,30 @@ form.addEventListener("submit", function (event) {
       return;
     }
   }
+  if (timeText.trim() !== "") {
+    const timeProblem = describeNumberProblem(timeText, "Disconnection time");
+
+    if (timeProblem !== "") {
+      errorBox.textContent = timeProblem;
+      return;
+    }
+  }
+
+  // The CPC type names its own metal, so it cannot disagree with the CPC metal
+  // select: a copper CPC in a PVC cable is not the same k as an aluminium one.
+  if (getCpcType(cpcType).material !== cpcMaterial && getCpcType(cpcType).material !== "steel") {
+    errorBox.textContent =
+      "CPC metal is " + cpcMaterial + " but the CPC type is " +
+      getCpcType(cpcType).label + " — pick a type that matches the metal.";
+    return;
+  }
+
 
   // Exactly the same functions the five verified cases use. The maths lives
   // in one place; the form is just another way of feeding it.
   const voltage = getSupplyVoltage(supply);
   
-    // Both methods in one call. Table 4D2B governs wherever it covers the size.
+  // Both methods in one call. Table 4D2B governs wherever it covers the size.
   const drop = calculateRunVoltageDrop(material, supply, length, current, csa, voltage);
   const volts = drop.volts;
   const percent = drop.percent;
@@ -2099,6 +2127,10 @@ form.addEventListener("submit", function (event) {
   // Same rule as capacity: "not checked" until something checks it, so an
   // unchecked circuit can never be reported as a pass.
   let zsResult = "not checked";
+
+  // Same rule again. Adiabatic can only be judged where Zs was judged, because
+  // the fault current comes from Zs.
+  let adiabaticResult = "not checked";
 
   if (deviceRating === null) {
     // Ib is past the end of the device ladder this tool knows.
@@ -2220,6 +2252,32 @@ form.addEventListener("submit", function (event) {
         `for a ${deviceRating} A ${getDeviceType(curve).label} — ` +
         `${zsResult}. On site the meter must read ` +
         `${loop.measuredMaxZs.toFixed(2)} Ω or less.`;
+      
+      // --- adiabatic ----------------------------------------------------
+      // Zs says the CPC is good enough to TRIP the device. This says it
+      // survives the fault while the device is tripping. Both or neither:
+      // the fault current comes from the Zs just calculated.
+      let disconnectTime = ADIABATIC_TIME_DEFAULT_S;
+      let timeSource = "assumed";
+
+      if (timeText.trim() !== "") {
+        disconnectTime = Number(timeText);
+        timeSource = "from the device curve";
+      }
+
+      const heat = evaluateAdiabatic(loop.zs, disconnectTime, cpcType, cpcSize);
+
+      adiabaticResult = heat.passes ? "PASS" : "at t = " + disconnectTime + " s";
+
+      note +=
+        ` CPC survival: fault current ${NOMINAL_U0_VOLTS} ÷ ` +
+        `${loop.zs.toFixed(3)} = ${heat.faultCurrent.toFixed(0)} A for ` +
+        `${heat.timeSeconds} s (${timeSource}) through ${heat.cpcLabel} ` +
+        `(k ${heat.k}) → needs ${heat.requiredCsa.toFixed(2)} mm², you have ` +
+        `${heat.installedCsa} mm² — ${heat.passes ? "PASS" : "FAIL"}. ` +
+        `That CPC withstands I²t up to ` +
+        `${heat.letThroughLimit.toFixed(0)} A²s; a device let-through figure ` +
+        `below that clears it.`;
     }
     sizingNote.textContent = note;
   }
@@ -2262,7 +2320,7 @@ form.addEventListener("submit", function (event) {
 
   // ONE verdict for the row, from BOTH checks. Before this, the row showed
   // the volt drop verdict alone — PASS on runs the capacity check had failed.
-  const verdict = combineVerdicts(result, capacityResult, zsResult);
+  const verdict = combineVerdicts(result, capacityResult, zsResult, adiabaticResult);
   const resultsBody = document.getElementById("results");
   resultsBody.innerHTML =
     `<tr><td>Your run — ${length} m, ${current} A, ${csa} mm²</td>` +

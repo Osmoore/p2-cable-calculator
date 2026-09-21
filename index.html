@@ -115,6 +115,41 @@
                 </select>
             </label>
 
+            <!-- The CPC type decides k, which decides whether the CPC survives
+                 the fault. Grouped by where the conductor sits, because that is
+                 what sets its starting temperature. -->
+            <label>CPC type (for the adiabatic check)
+                <select id="cpc-type">
+                    <optgroup label="In a cable or bunched">
+                        <option value="in_cable_pvc_cu">Copper CPC in a 70 °C PVC cable</option>
+                        <option value="in_cable_xlpe_cu">Copper CPC in a 90 °C thermosetting cable</option>
+                        <option value="in_cable_pvc_al">Aluminium CPC in a 70 °C PVC cable</option>
+                        <option value="in_cable_xlpe_al">Aluminium CPC in a 90 °C thermosetting cable</option>
+                    </optgroup>
+                    <optgroup label="Separate conductor">
+                        <option value="separate_pvc_cu">Separate copper CPC, PVC insulated</option>
+                        <option value="separate_xlpe_cu">Separate copper CPC, thermosetting</option>
+                        <option value="separate_bare_cu">Separate copper CPC, bare and visible</option>
+                        <option value="separate_pvc_al">Separate aluminium CPC, PVC insulated</option>
+                        <option value="separate_xlpe_al">Separate aluminium CPC, thermosetting</option>
+                        <option value="separate_bare_al">Separate aluminium CPC, bare and visible</option>
+                        <option value="separate_pvc_st">Separate steel CPC, PVC insulated</option>
+                        <option value="separate_xlpe_st">Separate steel CPC, thermosetting</option>
+                        <option value="separate_bare_st">Separate steel CPC, bare and visible</option>
+                    </optgroup>
+                    <optgroup label="Cable armour">
+                        <option value="armour_pvc">Steel wire armour, 70 °C PVC cable</option>
+                        <option value="armour_xlpe">Steel wire armour, 90 °C XLPE cable</option>
+                    </optgroup>
+                </select>
+            </label>
+
+            <!-- Empty means 0.1 s assumed. A figure read off the device's
+                 time/current curve replaces the assumption, and the note says
+                 which was used. -->
+            <label>Disconnection time (s, optional — 0.1 assumed)
+                <input type="text" id="disconnect-time"></label>
+
             <!-- Installation conditions. The capacity table above holds ONE
                  set of conditions: 30 °C ambient, one circuit, no insulation,
                  an MCB. These four selects say how far this run differs from
