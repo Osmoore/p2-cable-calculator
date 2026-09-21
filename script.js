@@ -248,128 +248,11 @@ function getCapacityColumn(material, method, supplyType) {
 // arrangement is an input now, and the note prints the one actually chosen.
 const SIZING_BASIS =
   "BS 7671 Table 4D2A, multicore 70 °C thermoplastic, copper";
-// Guard 1: capacity MUST rise with conductor size, in each column separately.
-// A bigger conductor carries more current, never less. Takes the column as an
-// argument now, so the same check runs on both without being written twice.
-function checkCapacityTableAscends(columnName, column) {
-  let previous = 0;
-
-  for (const size of STANDARD_CSA_MM2) {
-    const capacity = column[size];
-
-    // UNREACHABLE. checkTableCoversAllSizes runs before this and guarantees
-    // every size in STANDARD_CSA_MM2 is present, so this branch can no longer
-    // fire. Kept as a belt-and-braces stop rather than deleted — but said out
-    // loud, because a guard that quietly cannot fire is worse than none.
-    if (capacity === undefined) {
-      continue;
-    }
-
-    if (capacity <= previous) {
-      throw new Error(
-        columnName + " capacity is not ascending at " + size + " mm² — wrong table?");
-    }
-    previous = capacity;
-  }
-}
-
-// Guard 2: the two columns must sit in the right relationship to each other.
-//
-// Three-phase must be BELOW single-phase at every size — more loaded conductors
-// in one sheath, more heat, less capacity. If the columns are ever swapped, the
-// ratio goes above 1 and this fires even though both columns are individually
-// perfect ascending tables. Same idea as the 0.866 check on Table 4D2B.
-//
-// The real band in Table 4D2A col 6 vs col 7 is 0.857 to 0.905. The window here
-// is wider, to leave room for other installation methods later without being so
-// wide that a wrong column slips through.
-function checkCapacityColumnsAgree(method) {
-  const single = CURRENT_CAPACITY_A[method].singlePhase;
-  const three = CURRENT_CAPACITY_A[method].threePhase;
-
-  for (const size of Object.keys(single)) {
-    if (three[size] === undefined) {
-      throw new Error("Capacity table: " + size + " mm² is missing from threePhase");
-    }
-
-    const ratio = three[size] / single[size];
-
-    if (ratio >= 1) {
-      throw new Error(
-        "Capacity " + size + " mm²: three-phase " + three[size] +
-        " A is not below single-phase " + single[size] + " A — columns swapped?");
-    }
-    if (ratio < 0.80 || ratio > 0.95) {
-      throw new Error(
-        "Capacity " + size + " mm²: three-phase ÷ single-phase is " +
-        ratio.toFixed(4) + ", expected 0.80 to 0.95");
-    }
-  }
-}
-
-// Guard 3: STANDARD_CSA_MM2 and every table must agree on which sizes exist.
-//
-// Nothing enforced this before, and the three places that met a missing size
-// handled it three different ways: the capacity search skipped it, the ascend
-// check skipped it, and the volt drop lookup threw. So a size present in the
-// list but missing from one column would give a page that loads, calculates,
-// and silently never recommends that size — until a volt drop lookup landed on
-// it and the page died.
-//
-// One condition, one answer: a table and the size list that disagree is a
-// broken build, and it stops here.
-function checkTableCoversAllSizes(tableName, table) {
-  for (const size of STANDARD_CSA_MM2) {
-    if (table[size] === undefined) {
-      throw new Error(
-        tableName + " has no entry for " + size + " mm² — " +
-        "the table and STANDARD_CSA_MM2 disagree");
-    }
-  }
-}
-
 // The methods this tool holds, and the order of how well each one sheds heat.
 // A is worst — buried in an insulating wall, nowhere for heat to go. E is best
 // — open tray, air on all sides. The list is the severity order AND the list
 // the guards walk, so a method added to one is added to both.
 const CAPACITY_METHODS = ["A", "B", "C", "E"];
-
-// Guard 4: the methods must rank A < B < C < E at every size, both phases.
-//
-// This is the strongest check in the set. A whole method column pasted into
-// the wrong slot gets caught here even when every column is individually a
-// perfect ascending table with a correct phase ratio — because the only thing
-// wrong with it is WHERE it is.
-function checkMethodsRankCorrectly() {
-  for (const phase of ["singlePhase", "threePhase"]) {
-    for (const size of STANDARD_CSA_MM2) {
-      for (let i = 1; i < CAPACITY_METHODS.length; i++) {
-        const worse = CAPACITY_METHODS[i - 1];
-        const better = CAPACITY_METHODS[i];
-        const lo = CURRENT_CAPACITY_A[worse][phase][size];
-        const hi = CURRENT_CAPACITY_A[better][phase][size];
-
-        if (!(hi > lo)) {
-          throw new Error(
-            "Capacity " + size + " mm² " + phase + ": method " + better +
-            " (" + hi + " A) is not above method " + worse + " (" + lo +
-            " A) — columns out of order?");
-        }
-      }
-    }
-  }
-}
-
-// Coverage runs FIRST within each method. Every check after it can assume
-// every size is present, instead of each one deciding what to do about a gap.
-for (const method of CAPACITY_METHODS) {
-  checkTableCoversAllSizes("capacity " + method + " singlePhase", CURRENT_CAPACITY_A[method].singlePhase);
-  checkTableCoversAllSizes("capacity " + method + " threePhase", CURRENT_CAPACITY_A[method].threePhase);
-  checkCapacityTableAscends(method + " singlePhase", CURRENT_CAPACITY_A[method].singlePhase);
-  checkCapacityTableAscends(method + " threePhase", CURRENT_CAPACITY_A[method].threePhase);
-  checkCapacityColumnsAgree(method);
-}
-checkMethodsRankCorrectly();
 
 // --- correction factors -----------------------------------------------------
 // The capacity table above is for ONE set of conditions: 30 °C ambient, one
@@ -757,57 +640,6 @@ function checkImpedanceModulus(columnName, column) {
   }
 }
 
-// Guard 2: the two columns must describe the same conductor.
-// The single-phase column carries the ×2 go-and-return factor; the three-phase
-// column carries ×1.732. So dividing one by the other must give
-// 1.732 ÷ 2 = 0.866 at EVERY size. If a whole column is ever pasted into the
-// wrong slot this catches it, even when both columns are individually perfect.
-function checkPhaseColumnsAgree() {
-  const single = VOLTAGE_DROP_TABLE_4D2B.singlePhase;
-  const three = VOLTAGE_DROP_TABLE_4D2B.threePhase;
-
-  for (const size of Object.keys(single)) {
-    if (three[size] === undefined) {
-      throw new Error("Table 4D2B: " + size + " mm² is missing from threePhase");
-    }
-
-    const ratio = three[size].z / single[size].z;
-
-    if (ratio < 0.82 || ratio > 0.91) {
-      throw new Error(
-        "Table 4D2B " + size + " mm²: three-phase ÷ single-phase is " +
-        ratio.toFixed(4) + ", expected about 0.866 — columns swapped?");
-    }
-  }
-}
-
-// Guard 3: the resistivity this table implies must be physically sensible.
-// Rearranging mV/A/m = 2 × ρ × 1000 ÷ A gives ρ = r × A ÷ 2000. Copper at its
-// 70 °C operating temperature is about 0.022. This is the strongest of the
-// three checks: one wrong digit anywhere in the r column moves its size
-// straight out of the window.
-function checkImpliedResistivity() {
-  const single = VOLTAGE_DROP_TABLE_4D2B.singlePhase;
-
-  for (const size of Object.keys(single)) {
-    const rho = single[size].r * Number(size) / 2000;
-
-    if (rho < RHO_IMPLIED_MIN || rho > RHO_IMPLIED_MAX) {
-      throw new Error(
-        "Table 4D2B " + size + " mm²: implies ρ = " + rho.toFixed(5) +
-        ", outside " + RHO_IMPLIED_MIN + "–" + RHO_IMPLIED_MAX + " — typo?");
-    }
-  }
-}
-
-checkTableCoversAllSizes("Table 4D2B singlePhase", VOLTAGE_DROP_TABLE_4D2B.singlePhase);
-checkTableCoversAllSizes("Table 4D2B threePhase", VOLTAGE_DROP_TABLE_4D2B.threePhase);
-checkImpedanceModulus("singlePhase", VOLTAGE_DROP_TABLE_4D2B.singlePhase);
-checkImpedanceModulus("threePhase", VOLTAGE_DROP_TABLE_4D2B.threePhase);
-checkPhaseColumnsAgree();
-checkImpliedResistivity();
-
-
 // ============================================================================
 // ALUMINIUM — Part A: data and guards only. Nothing reads these yet.
 // Part B wires them into the sizing through a CONDUCTORS registry; until then
@@ -1008,26 +840,8 @@ function checkAluminiumBelowCopper() {
   }
 }
 
-// Run order: coverage first, then everything that assumes coverage.
-for (const method of CAPACITY_METHODS) {
-  const cols = CURRENT_CAPACITY_AL_A[method];
-  checkCoversSizes("Al capacity " + method + " singlePhase", cols.singlePhase, STANDARD_CSA_AL_MM2);
-  checkCoversSizes("Al capacity " + method + " threePhase", cols.threePhase, STANDARD_CSA_AL_MM2);
-  checkAscendsOver("Al " + method + " singlePhase", cols.singlePhase, STANDARD_CSA_AL_MM2);
-  checkAscendsOver("Al " + method + " threePhase", cols.threePhase, STANDARD_CSA_AL_MM2);
-  checkCapacityPhasesAgree("Al capacity " + method, cols.singlePhase, cols.threePhase, STANDARD_CSA_AL_MM2);
-}
-checkMethodsRankOver("Al capacity", CURRENT_CAPACITY_AL_A, STANDARD_CSA_AL_MM2);
-
-checkCoversSizes("Table 4D4B singlePhase", VOLTAGE_DROP_TABLE_4D4B_AL.singlePhase, STANDARD_CSA_AL_MM2);
-checkCoversSizes("Table 4D4B threePhase", VOLTAGE_DROP_TABLE_4D4B_AL.threePhase, STANDARD_CSA_AL_MM2);
-checkImpedanceModulus("Al singlePhase", VOLTAGE_DROP_TABLE_4D4B_AL.singlePhase);
-checkImpedanceModulus("Al threePhase", VOLTAGE_DROP_TABLE_4D4B_AL.threePhase);
-checkDropPhasesAgree("Table 4D4B", VOLTAGE_DROP_TABLE_4D4B_AL, STANDARD_CSA_AL_MM2);
-checkResistivityWindow("Table 4D4B", VOLTAGE_DROP_TABLE_4D4B_AL, STANDARD_CSA_AL_MM2,
-  RHO_IMPLIED_AL_MIN, RHO_IMPLIED_AL_MAX);
-
-checkAluminiumBelowCopper();
+// The guards run once for EVERY conductor in CONDUCTORS — see the block just
+// after the registry. Aluminium no longer keeps its own copy of the run order.
 // ============================================================================
 // End of aluminium Part A.
 // ============================================================================
@@ -1114,6 +928,45 @@ function checkConductorsAreComplete() {
 }
 
 checkConductorsAreComplete();
+
+// Every table, every metal, one run order. Each conductor brings its own size
+// list, its own tables and its own ρ window, so a third metal means a registry
+// entry and nothing else.
+//
+// This replaced six copper-only guard functions on 21 Sep 2026. They did the
+// same work against hard-wired copper data: every rule existed twice, and only
+// one copy was ever updated when a rule changed.
+for (const materialKey of Object.keys(CONDUCTORS)) {
+  const conductor = CONDUCTORS[materialKey];
+  const label = conductor.label;
+  const sizes = conductor.sizes;
+
+  // Coverage runs FIRST. Every check after it can then assume every size is
+  // present, instead of each one deciding what to do about a gap.
+  for (const method of CAPACITY_METHODS) {
+    const cols = conductor.capacity[method];
+
+    checkCoversSizes(label + " capacity " + method + " singlePhase", cols.singlePhase, sizes);
+    checkCoversSizes(label + " capacity " + method + " threePhase", cols.threePhase, sizes);
+    checkAscendsOver(label + " " + method + " singlePhase", cols.singlePhase, sizes);
+    checkAscendsOver(label + " " + method + " threePhase", cols.threePhase, sizes);
+    checkCapacityPhasesAgree(label + " capacity " + method, cols.singlePhase, cols.threePhase, sizes);
+  }
+  checkMethodsRankOver(label + " capacity", conductor.capacity, sizes);
+
+  const drop = conductor.voltageDrop;
+  const dropName = conductor.voltageDropTable;
+
+  checkCoversSizes(dropName + " singlePhase", drop.singlePhase, sizes);
+  checkCoversSizes(dropName + " threePhase", drop.threePhase, sizes);
+  checkImpedanceModulus(dropName + " singlePhase", drop.singlePhase);
+  checkImpedanceModulus(dropName + " threePhase", drop.threePhase);
+  checkDropPhasesAgree(dropName, drop, sizes);
+  checkResistivityWindow(dropName, drop, sizes, conductor.rhoMin, conductor.rhoMax);
+}
+
+checkAluminiumBelowCopper();
+
 
 
 // Which column of Table 4D2B this supply uses. Same throw-on-unknown rule as
@@ -1626,6 +1479,172 @@ checkResistanceAgreesWithOperatingRho();
 checkEarthingSystemsAreComplete();
 // ============================================================================
 // End of earth fault loop impedance Part A.
+// ============================================================================
+
+
+// ============================================================================
+// ADIABATIC CPC CHECK — Part A: data and guards only.
+// Zs asks whether the CPC is big enough to make the device TRIP. This asks
+// whether it SURVIVES the fault current while the device is tripping. A CPC
+// can pass one and fail the other.
+// ============================================================================
+
+//     S ≥ √(I² × t) ÷ k
+//
+// t is the disconnection time. For an MCB tripping on its magnetic element the
+// real time is a few milliseconds, not the 0.4 s of Reg 411.3.2.2 — using 0.4 s
+// would demand a CPC several times too big and the tool would be ignored.
+// 0.1 s is the working convention, and below that BS 7671 says to use the
+// manufacturer's let-through energy (I²t) instead of this formula at all.
+//
+// So: an INPUT, defaulting to 0.1 s, with the note printing the value used and
+// saying where a better figure comes from.
+const ADIABATIC_TIME_DEFAULT_S = 0.1;
+
+// One entry per real CPC arrangement. Not three nested groups with three
+// different shapes: the arrangement is ONE choice, and it decides the metal,
+// the k, and the temperatures k was derived at, which travel together.
+//
+// initialC is where the conductor starts (hotter if it is inside the cable,
+// carrying its share of the load) and finalC is the highest temperature the
+// insulation around it may reach.
+const CPC_TYPES = {
+  separate_pvc_cu:   { label: "separate copper CPC, PVC insulated",      material: "copper",    k: 143, initialC: 30, finalC: 160, checkable: true },
+  separate_xlpe_cu:  { label: "separate copper CPC, thermosetting",      material: "copper",    k: 176, initialC: 30, finalC: 250, checkable: true },
+  separate_bare_cu:  { label: "separate copper CPC, bare and visible",   material: "copper",    k: 228, initialC: 30, finalC: 500, checkable: true },
+  separate_pvc_al:   { label: "separate aluminium CPC, PVC insulated",   material: "aluminium", k: 95,  initialC: 30, finalC: 160, checkable: true },
+  separate_xlpe_al:  { label: "separate aluminium CPC, thermosetting",   material: "aluminium", k: 116, initialC: 30, finalC: 250, checkable: true },
+  separate_bare_al:  { label: "separate aluminium CPC, bare and visible", material: "aluminium", k: 152, initialC: 30, finalC: 500, checkable: true },
+  separate_pvc_st:   { label: "separate steel CPC, PVC insulated",       material: "steel",     k: 52,  initialC: 30, finalC: 160, checkable: true },
+  separate_xlpe_st:  { label: "separate steel CPC, thermosetting",       material: "steel",     k: 64,  initialC: 30, finalC: 250, checkable: true },
+  separate_bare_st:  { label: "separate steel CPC, bare and visible",    material: "steel",     k: 82,  initialC: 30, finalC: 500, checkable: true },
+  in_cable_pvc_cu:   { label: "copper CPC in a 70 °C PVC cable",         material: "copper",    k: 115, initialC: 70, finalC: 160, checkable: true },
+  in_cable_xlpe_cu:  { label: "copper CPC in a 90 °C thermosetting cable", material: "copper",  k: 143, initialC: 90, finalC: 250, checkable: true },
+  in_cable_pvc_al:   { label: "aluminium CPC in a 70 °C PVC cable",      material: "aluminium", k: 76,  initialC: 70, finalC: 160, checkable: true },
+  in_cable_xlpe_al:  { label: "aluminium CPC in a 90 °C thermosetting cable", material: "aluminium", k: 94, initialC: 90, finalC: 250, checkable: true },
+
+  // Table 54.4. checkable:false, and the reason is in checkKFactorsAgainstPhysics
+  // below — it is NOT laziness, it is that no single constant reproduces both
+  // armour rows, so this tool cannot verify them. They are transcribed only.
+  armour_pvc:        { label: "steel wire armour on a 70 °C PVC cable",  material: "steel",     k: 51,  initialC: 60, finalC: 160, checkable: false },
+  armour_xlpe:       { label: "steel wire armour on a 90 °C XLPE cable", material: "steel",     k: 46,  initialC: 80, finalC: 200, checkable: false },
+};
+
+function getCpcType(typeCode) {
+  const cpcType = CPC_TYPES[typeCode];
+
+  if (cpcType === undefined) {
+    throw new Error("Unknown CPC type: " + typeCode);
+  }
+  return cpcType;
+}
+
+// k comes from the conductor's own material properties:
+//
+//     k = K0 × √( ln( (β + θf) ÷ (β + θi) ) )
+//
+// K0 gathers the heat capacity and resistivity of the metal; β is the inverse
+// of its temperature coefficient. Both are constants of the METAL, so one pair
+// per metal reproduces every row that metal appears in, at any temperature.
+const K_CONSTANTS = {
+  copper:    { k0: 226, beta: 234.5 },
+  aluminium: { k0: 148, beta: 228 },
+  steel:     { k0: 78,  beta: 202 },
+};
+
+// The thirteen conductor rows reproduce to within 0.8%, so 3% passes the real
+// rounding and catches a mistyped digit or a k filed against the wrong
+// temperature pair.
+const K_TOLERANCE_PERCENT = 3.0;
+
+// Guard 1: every checkable k must follow from its own temperature pair.
+//
+// This is the strongest check available on this data: it does not compare the
+// table with itself, it derives each value from physics and the temperatures
+// the book prints beside it.
+//
+// The two armour rows are EXCLUDED and this is said out loud rather than
+// quietly skipped. No single β reproduces both 51 at 60→160 and 46 at 80→200,
+// so the armour figures are transcribed on the book's authority alone. If a
+// wrong k is ever typed into those two rows, nothing here will catch it.
+function checkKFactorsAgainstPhysics() {
+  for (const code of Object.keys(CPC_TYPES)) {
+    const cpcType = CPC_TYPES[code];
+
+    if (cpcType.checkable === false) {
+      continue;
+    }
+
+    const constants = K_CONSTANTS[cpcType.material];
+
+    if (constants === undefined) {
+      throw new Error("CPC type " + code + ": no k constants for " + cpcType.material);
+    }
+    if (!(cpcType.finalC > cpcType.initialC)) {
+      throw new Error(
+        "CPC type " + code + ": final temperature " + cpcType.finalC +
+        " °C is not above the initial " + cpcType.initialC + " °C");
+    }
+
+    const computed = constants.k0 * Math.sqrt(
+      Math.log((constants.beta + cpcType.finalC) / (constants.beta + cpcType.initialC)));
+    const deviation = Math.abs(computed - cpcType.k) / cpcType.k * 100;
+
+    if (deviation > K_TOLERANCE_PERCENT) {
+      throw new Error(
+        "CPC type " + code + ": k is " + cpcType.k + " but " +
+        cpcType.initialC + "→" + cpcType.finalC + " °C gives " +
+        computed.toFixed(1) + " — " + deviation.toFixed(1) + "% apart");
+    }
+  }
+}
+
+// Guard 2: a CPC that starts COLD can absorb more before it reaches the same
+// final temperature, so a separate conductor must have a higher k than the
+// same metal inside a cable. This catches the two groups being swapped, which
+// the physics check alone would not: both would still be internally correct.
+function checkSeparateCpcBeatsInCable() {
+  const pairs = [
+    ["separate_pvc_cu", "in_cable_pvc_cu"],
+    ["separate_xlpe_cu", "in_cable_xlpe_cu"],
+    ["separate_pvc_al", "in_cable_pvc_al"],
+    ["separate_xlpe_al", "in_cable_xlpe_al"],
+  ];
+
+  for (const pair of pairs) {
+    const separate = getCpcType(pair[0]);
+    const inCable = getCpcType(pair[1]);
+
+    if (!(separate.k > inCable.k)) {
+      throw new Error(
+        "CPC k: " + pair[0] + " (" + separate.k + ") is not above " +
+        pair[1] + " (" + inCable.k + ") — groups swapped?");
+    }
+  }
+}
+
+// Guard 3: every entry is complete. A missing label or metal is a page that
+// prints "undefined" at somebody on site.
+function checkCpcTypesAreComplete() {
+  for (const code of Object.keys(CPC_TYPES)) {
+    const cpcType = CPC_TYPES[code];
+
+    for (const field of ["label", "material", "k", "initialC", "finalC", "checkable"]) {
+      if (cpcType[field] === undefined) {
+        throw new Error("CPC type " + code + " has no " + field);
+      }
+    }
+    if (!(cpcType.k > 0)) {
+      throw new Error("CPC type " + code + ": k must be above zero");
+    }
+  }
+}
+
+checkCpcTypesAreComplete();
+checkKFactorsAgainstPhysics();
+checkSeparateCpcBeatsInCable();
+// ============================================================================
+// End of adiabatic Part A.
 // ============================================================================
 
 
