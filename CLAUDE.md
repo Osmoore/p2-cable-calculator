@@ -187,6 +187,21 @@ typed by hand).
 If the method changes, the code changes, and the verified cases are re-worked
 on paper before they are trusted again.
 
+### Case 7 — the aluminium reference run, added 19 Sep 2026
+
+Cases 1 to 6 are copper. Case 7 is the aluminium one, so a change to the
+aluminium tables or to ρ cannot pass unnoticed:
+
+    70 mm², three-phase 415 V, 80 m, 100 A, power circuit
+
+    tabulated    0.92 × 100 × 80 ÷ 1000            = 7.36 V   1.77%  PASS
+    resistivity  1.732 × 80 × 100 × 0.0365 ÷ 70    = 7.22 V   1.74%  PASS
+
+The methods differ by 1.8%, resistivity low, because the tabulated z carries
+the reactance (x = 0.13) that the formula does not. Copper Case 6 shows the
+same 1.8% gap for the same reason. Each case now names its own metal, and the
+loop reads it — a case that does not say gets no default, it stops the page.
+
 ### Correction — ρ was wrong for four days
 
 From 14 to 17 Sep 2026 this tool used **ρ = 0.018**, documented as "copper at
@@ -325,9 +340,6 @@ does not know:
 - Multicore 70 °C thermoplastic, non-armoured. Copper 1–400 mm²
   (Tables 4D2A/4D2B) or aluminium 16–400 mm² (Tables 4D4A/4D4B). Armoured
   (SWA) cable has its own tables and is not covered.
-- No hand-worked aluminium verified case yet. The six verified cases are all
-  copper; aluminium is checked by the load-time guards and by hand-checked
-  form runs, not by a fixed reference case.
 - The copper guards from before 19 Sep are still hard-wired to copper
   (checkTableCoversAllSizes, checkCapacityTableAscends,
   checkCapacityColumnsAgree, checkMethodsRankCorrectly, checkPhaseColumnsAgree,
