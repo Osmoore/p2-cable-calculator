@@ -42,6 +42,9 @@ Neither ever guesses a default, and neither ever calculates anyway.
 
 - Never interpolate between tabulated values. The page offers only the points
   the standard publishes, and an untabulated value throws.
+- ONE guard per rule, never one per metal. The guards take the table and the
+  size list as arguments and run in a loop over CONDUCTORS. A rule written
+  twice gets updated once.
 - Every data table validates its own shape at load. Capacity must ascend with
   CSA. Correction factors must never rise. Base conditions must be exactly
   1.00. Impedance must satisfy z = √(r² + x²) within the table's own rounding.
@@ -108,6 +111,20 @@ Neither ever guesses a default, and neither ever calculates anyway.
   FAIL (capacity, volt drop). Where capacity was never checked (Ib above the
   125 A ladder) the row says so — "PASS (volt drop only — capacity not
   checked)" — rather than claiming a full PASS.
+- FOUR questions, four answers, one verdict: will the cable overheat
+  (capacity), will the volts hold up (volt drop), will a fault disconnect the
+  device (Zs), will the CPC survive while it does (adiabatic). A circuit can
+  pass any three and fail the fourth, so the row names which failed.
+- Zs is a SEPARATE question from Ib ≤ In ≤ Iz. Capacity says the cable will
+  not overheat; Zs says a fault to earth will trip the device in time. A
+  circuit can pass either and fail the other, so the row names which failed.
+- The Zs limits are COMPUTED, never stored: Zs_max = (CMIN × U0) ÷ (Ia × In).
+  CMIN and each type's Ia multiplier are single constants, and a load-time
+  guard reproduces all 39 published values from them. Storing 39 numbers
+  would be 39 chances to mistype a limit and no way to argue with the basis.
+- Ze is a MEASUREMENT. An empty box uses the arrangement's typical figure and
+  the note says "assumed"; a typed figure says "measured". A number nobody
+  measured is never presented as one that was.
 - Below a metal's smallest tabulated size the page REFUSES with a message.
   It does not fall back to the resistivity formula, because the tool would
   then be sizing a conductor the standard does not publish.
@@ -262,6 +279,109 @@ through the form, including both-fail, off-ladder and non-standard sizes.
 Same family as the two corrections above: two parts of the tool each told the
 truth about their own question, and nothing made them agree.
 
+### Earth fault loop impedance — added 21 Sep 2026
+
+    Zs = Ze + (R1 + R2) × 1.20       compared against (CMIN × U0) ÷ (Ia × In)
+
+- **Ze** comes from the supply: TN-C-S 0.35 Ω, TN-S 0.80 Ω as UK DNO design
+  limits, which on ECG's network are assumptions until measured.
+- **(R1 + R2)** is this circuit's line conductor plus its CPC, from the 20 °C
+  resistance table. It is NOT stored as pairs: r1 + r2 is added when needed,
+  so any line-and-CPC combination works and no number exists twice.
+- **1.20** warms the circuit from 20 °C to its operating temperature. It
+  belongs to 70 °C thermoplastic; XLPE differs and is still parked. Ze is not
+  warmed — it is measured at the origin as it stands.
+- **Ia** is 5 × In for Type B, 10 × for C, 20 × for D: the TOP of each
+  published band, which is the worst case the breaker may need before it trips.
+- **CMIN = 1.00**, because the printed Table 41.3 in use gives 7.67 Ω at 6 A,
+  1.44 Ω at 32 A and 0.73 Ω at 63 A for Type B — U0 ÷ (5 × In) with no factor.
+  Read from the book and confirmed 21 Sep 2026. A2:2022 is understood to apply
+  Cmin = 0.95, which would lower every limit about 5% (1.37 Ω at 32 A) and is
+  the SAFER figure; if that basis is ever confirmed for this installation, one
+  constant changes and all 39 limits move together.
+- **0.8 × the limit** is what a meter may read on site, because an instrument
+  tests a cold conductor and the limit is for a hot one. The note prints it.
+
+Two refusals rather than wrong answers:
+
+- **TT** relies on an RCD (RA × IΔn ≤ 50 V), not on the breaker's Zs limit.
+  Judging TT against a Type B limit would fail nearly every real installation
+  and teach the user to ignore the tool.
+- **BS 3036** has no fixed Ia multiple; its disconnection time comes from a
+  time/current curve this tool does not hold.
+
+A rating off the device ladder (45 A, say) is COMPUTED rather than refused:
+the ladder says which devices the tool picks automatically, the formula says
+what the physics is, and a 45 A Type B breaker exists. The boundary is the
+device type — only B, C and D have a fixed Ia multiple, and getDeviceType
+throws on anything else.
+
+The strongest evidence in this section is accidental. The On-Site Guide's
+20 °C resistances imply ρ = 18.3 for copper and 30.4 for aluminium; warmed by
+1.2 they give 22.0 and 36.5, against the 0.022 and 0.0365 derived weeks
+earlier from Tables 4D2B and 4D4B. Two unrelated sources, half a percent
+apart, and a load-time guard now checks it on every page load.
+
+### Adiabatic CPC check — added 21 Sep 2026
+
+    S ≥ √(I² × t) ÷ k        I = U0 ÷ Zs
+
+Zs asks whether the CPC is good enough to TRIP the device. This asks whether
+it SURVIVES while the device is tripping. The two are not the same question
+and a CPC can pass one and fail the other.
+
+"Adiabatic" means the equation assumes ALL the heat stays in the conductor for
+the duration of the fault — none escapes into the insulation or the air. That
+is pessimistic on purpose: a fault is over long before heat has time to go
+anywhere.
+
+- **I** is U0 ÷ Zs, the Zs this tool just calculated, so the two checks cannot
+  be based on different circuits. Note the direction: a LOW Zs is good for
+  disconnection and hard on the CPC. The trouble appears near the origin, not
+  at the far end of a long run.
+- **k** comes from the CPC arrangement, not from the metal alone. One registry
+  entry per arrangement holds the metal, k, and the two temperatures k was
+  derived at, because a copper CPC inside a cable starts at 70 °C and a
+  separate one starts at 30 °C — 115 against 143 for the same metal.
+- **t = 0.1 s by default, and it is an INPUT.** The real trip time for an MCB
+  on its magnetic element is a few milliseconds; 0.4 s from Reg 411.3.2.2 would
+  demand a CPC several times too big and the tool would be ignored. Below
+  0.1 s BS 7671 says to use the manufacturer's let-through energy instead of
+  this formula at all.
+
+**The known consequence, accepted deliberately.** At high fault current the
+0.1 s assumption fails circuits that are compliant in practice. A 32 A Type B
+with 6/2.5 mm² twin and earth, 5 m from a strong supply: 2036 A needs 5.60 mm²
+at 0.1 s, against the 2.5 mm² installed. The real breaker current-limits and
+clears in milliseconds. So the tool does three things rather than just failing:
+it names the basis in the verdict — FAIL (adiabatic at t = 0.1 s) — it prints
+the let-through energy the installed CPC can take (2.5 mm² at k 115 withstands
+82,656 A²s), and it takes t as an input so a figure read off the device curve
+replaces the assumption. A FAIL is a prompt to check the data sheet, not a
+dead end.
+
+**Where the k values come from, and one place they do not.** k follows from
+the metal's own properties:
+
+    k = K0 × √( ln( (β + θf) ÷ (β + θi) ) )
+
+with K0/β of 226/234.5 for copper, 148/228 for aluminium, 78/202 for steel.
+All THIRTEEN conductor rows of Tables 54.2 and 54.3 reproduce to within 0.8%,
+and a load-time guard recomputes every one of them. That is stronger than
+checking a table against itself: each k is derived from physics and the
+temperatures the book prints beside it.
+
+The two armour rows of Table 54.4 are the exception. No single β reproduces
+both 51 at 60→160 and 46 at 80→200, so they carry checkable:false and rest on
+the book's authority alone — if a wrong k is ever typed there, nothing catches
+it. Said out loud in the code, because a guard that cannot fire must say so.
+
+(On 21 Sep 2026 this check appeared to find an error in the book: steel's
+conductor constant gives 44.4, not 51, at 60→160. Emmanuel read the printed
+table and it says 60, 160 and 51. The check was wrong, not the book — armour
+assumes different properties from a steel conductor. A cross-check that
+disagrees means one of the two is wrong, and it is not always the data.)
+
 ## Limits
 
 | Circuit type | Limit |
@@ -327,7 +447,7 @@ are gentler than the column actually in use.
 *(The bunched Cg column was parked here from 17 to 18 Sep 2026 waiting for a
 capacity column to pair with. Methods A and B gave it one, and it now ships.)*
 
-## Known limitations — 19 Sep 2026
+## Known limitations — 21 Sep 2026
 
 The tool sizes on current-carrying capacity AND volt drop, with Ca, Cg, Ci
 and Cf applied, and cross-checks volt drop against Table 4D2B or 4D4B. What it still
@@ -340,19 +460,23 @@ does not know:
 - Multicore 70 °C thermoplastic, non-armoured. Copper 1–400 mm²
   (Tables 4D2A/4D2B) or aluminium 16–400 mm² (Tables 4D4A/4D4B). Armoured
   (SWA) cable has its own tables and is not covered.
-- The copper guards from before 19 Sep are still hard-wired to copper
-  (checkTableCoversAllSizes, checkCapacityTableAscends,
-  checkCapacityColumnsAgree, checkMethodsRankCorrectly, checkPhaseColumnsAgree,
-  checkImpliedResistivity) and sit beside the general versions aluminium uses.
-  They work; they are duplication. Point copper at the general versions and
-  retire them.
 - Ci stops at 400 mm. A cable totally surrounded by insulation over a longer
   route is not held. Size that by hand.
 - The BS 3036 rating ladder is not held. Selecting a BS 3036 fuse requires the
   rating to be typed in; the tool refuses to derive one.
 - The device ladder tops out at 125 A. Above that the tool says so and stops.
-- NO earth fault loop impedance or disconnection time check.
-- NO adiabatic check on CPC sizing.
+- Zs is checked for TN-S and TN-C-S with Type B, C and D devices only. TT
+  (needs the RCD rule) and BS 3036 are refused with their reasons. RCD
+  disconnection, and the 5 s versus 0.4 s distinction for distribution
+  circuits, are not modelled — for these devices one Ia satisfies both.
+- Ze defaults are UK DNO design limits. On ECG's network they are assumptions
+  until measured, and the note says which was used.
+- The adiabatic check runs only where Zs runs: TN-S and TN-C-S with a Type B,
+  C or D device. Its default t = 0.1 s is conservative at high fault currents
+  (see The method), and the two armour k values cannot be verified by the
+  load-time guard.
+- Lead-sheathed cable (k = 26) is NOT held: the source gave no temperature
+  pair to check it against, and it is not a cable used here.
 - Calculates ONE run in isolation; cannot chain a submain to a final circuit.
   "Mixed" applies the 3% lighting limit to the whole run, which is
   conservative — the real requirement is total drop from origin to the point
@@ -366,12 +490,7 @@ conditions you declared.**
 
 ## Still to build — in the order chosen 17 Sep 2026
 
-1. Earth fault loop impedance and disconnection time. Needs R1+R2 per metre
-   per size, max Zs per device type and rating, and the earthing arrangement
-   as an input. Much larger than anything above it.
-2. Adiabatic check on CPC sizing. Needs k values and fault current. Pairs
-   naturally with 1 — same data, same session.
-3. Cascading runs (origin → submain → final circuit). A data-model change,
+1. Cascading runs (origin → submain → final circuit). A data-model change,
    not a table: the tool would hold a chain of runs and budget the total drop
    across them.
 
@@ -379,10 +498,18 @@ Done and struck off: current-carrying capacity (16 Sep), correction factors
 Ca/Cg/Ci/Cf (17 Sep), tabulated mV/A/m cross-check (17 Sep), capacity column by
 core count (18 Sep), installation methods A/B/C/E (18 Sep), aluminium — data
 and guards, CONDUCTORS registry, material select and 16 mm² refusal (19 Sep),
-combined capacity + volt drop verdict (19 Sep).
+combined capacity + volt drop verdict (19 Sep), earth fault loop impedance —
+computed Zs limits, 20 °C resistance table, TN-S/TN-C-S, Type B/C/D, TT and
+BS 3036 refusals (21 Sep), adiabatic CPC check — CPC_TYPES registry, k
+recomputed from physics, t as an input (21 Sep).
 
-Small jobs outstanding: an aluminium verified case; retiring the copper-only
-guard copies (see Known limitations).
+Retired 21 Sep 2026: the six copper-only guard functions. One loop over
+CONDUCTORS now runs the general guards over every metal, which gave copper two
+checks it never had — the ρ window on its three-phase column, and coverage
+driven by its own size list. 174 lines out, 40 in.
+
+Small job outstanding: a hand-worked verified case for Zs and the adiabatic
+check, ideally from a real job.
 
 ## Naming — resolved 14 Sep 2026
 
