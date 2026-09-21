@@ -1616,6 +1616,70 @@ checkEarthingSystemsAreComplete();
 // End of earth fault loop impedance Part A.
 // ============================================================================
 
+
+// One resistance, at 20 °C, in mΩ per metre. A lookup, so it THROWS on a size
+// the metal is not tabulated in — the same rule as every other lookup here.
+// A person typing an impossible CPC size is caught on the page, before this.
+function getResistancePerMetre(material, csa) {
+  const table = RESISTANCE_PER_METRE_20C[material];
+
+  if (table === undefined) {
+    throw new Error("No resistance table for " + material);
+  }
+  if (table[csa] === undefined) {
+    throw new Error(
+      "No " + material + " resistance for " + csa + " mm² at 20 °C");
+  }
+  return table[csa];
+}
+
+// The earth fault loop for one circuit, and whether it is inside the limit.
+//
+//     Zs = Ze + (R1 + R2)
+//
+// Ze is what the supply brings to the origin. (R1 + R2) is this circuit's own
+// line conductor and CPC — the fault current goes out on one and back on the
+// other, which is why both are in the loop and why the CPC size matters as
+// much as the line size.
+//
+// The table is at 20 °C and a fault happens with the cable at its operating
+// temperature, so the CIRCUIT part is warmed by FAULT_TEMPERATURE_FACTOR.
+// Ze is NOT warmed: it is measured at the origin as it stands.
+//
+// Returns an object, not a verdict, because the page has to show the working:
+// a person who disagrees with the answer needs to see which number to argue
+// with. Nothing here is rounded — rounding happens at display only.
+function calculateZs(lineMaterial, cpcMaterial, lineCsa, cpcCsa, lengthMetres, zeOhms, deviceTypeCode, deviceRating) {
+  if (!(lengthMetres > 0)) {
+    throw new Error("Length must be above zero, got " + lengthMetres);
+  }
+  if (!(zeOhms >= 0)) {
+    throw new Error("Ze must be zero or above, got " + zeOhms);
+  }
+
+  const r1 = getResistancePerMetre(lineMaterial, lineCsa);
+  const r2 = getResistancePerMetre(cpcMaterial, cpcCsa);
+
+  // mΩ/m × m gives mΩ, so divide by 1000 for ohms.
+  const circuitOhms =
+    ((r1 + r2) * FAULT_TEMPERATURE_FACTOR * lengthMetres) / 1000;
+
+  const zs = zeOhms + circuitOhms;
+  const maxZs = calculateMaxZs(deviceTypeCode, deviceRating);
+
+  return {
+    ze: zeOhms,
+    r1PlusR2PerMetre: r1 + r2,
+    temperatureFactor: FAULT_TEMPERATURE_FACTOR,
+    circuitOhms: circuitOhms,
+    zs: zs,
+    maxZs: maxZs,
+    measuredMaxZs: maxZs * MEASURED_ZS_FACTOR,
+    passes: zs <= maxZs,
+    marginOhms: maxZs - zs
+  };
+}
+
 // The smallest listed size that can carry the device rating ONCE the
 // installation conditions are accounted for.
 //
