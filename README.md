@@ -8,7 +8,7 @@ No build step, no npm packages, no framework, no backend. Open `index.html` in a
 
 ## 1. What It Does
 
-The engine answers four engineering questions for every run, and then turns the cable into an itemised cost:
+The engine answers five engineering questions for every run — overheating, volt drop, loop impedance, CPC survival, and how those cascade down a two-link chain — and then turns the cable into an itemised cost:
 
 1. **Will the cable overheat? (Current-carrying capacity):**
    * Follows Regulation 433.1.1 ($I_b \le I_n \le I_z$). The cable is sized to carry the breaker rating ($I_n$), not just the design current ($I_b$).
