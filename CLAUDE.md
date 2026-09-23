@@ -529,6 +529,14 @@ does not know:
 - No XLPE (90 °C thermosetting). Its Ca column is parked in Domain notes.
 - USD pricing is indicative: a public mid-market rate plus the user's own FX
   allowance, not a bank quotation.
+- The quote's timestamp is when THIS TOOL locked the rate, not how old the
+  rate was when it arrived. The endpoint sends Cache-Control: max-age=3600, so
+  the browser can answer a fetch from its own cache with a figure up to an
+  hour old, and the Age header that says so is not read. Found 23 Sep 2026
+  during the offline commissioning test: with wi-fi off, a USD price still
+  priced, because the request never left the machine. Fix when convenient —
+  read response.headers.get("Age") and print "rate up to N minutes old" — but
+  the exposure is one hour on a rate that is indicative anyway.
 
 **A PASS is not a compliant design. It is an arithmetic result against the
 conditions you declared.**
