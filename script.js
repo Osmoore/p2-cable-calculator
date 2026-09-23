@@ -152,7 +152,7 @@ function evaluateVerdict(percent, limit) {
 
 // One verdict from both checks. A cable must pass capacity AND volt drop;
 // listing every failure tells the person WHAT to fix, not just that it failed.
-function combineVerdicts(voltDropResult, capacityResult, zsResult , adiabaticResult) {
+function combineVerdicts(voltDropResult, capacityResult, zsResult, adiabaticResult, chainResult, submainResult) {
   const failures = [];
 
   if (capacityResult === "FAIL") {
@@ -170,6 +170,15 @@ function combineVerdicts(voltDropResult, capacityResult, zsResult , adiabaticRes
   // doing the work and the person needs to know which number to look up.
   if (adiabaticResult !== "PASS" && adiabaticResult !== "not checked") {
     failures.push("adiabatic " + adiabaticResult);
+  }
+  // Named separately from "volt drop", which is this circuit alone: a chain
+  // can fail on the total while every link passes on its own.
+  if (chainResult === "FAIL") {
+    failures.push("chain volt drop");
+  }
+  // The submain's own failures, named as the submain's.
+  if (submainResult !== "PASS" && submainResult !== "not checked") {
+    failures.push("submain " + submainResult);
   }
 
   if (failures.length > 0) {
@@ -1655,6 +1664,104 @@ checkSeparateCpcBeatsInCable();
 // End of adiabatic Part A.
 // ============================================================================
 
+// ============================================================================
+// CASCADING RUNS — origin → submain → final circuit.
+// ============================================================================
+
+// One link of a chain, checked on its own terms.
+//
+// The final circuit is still handled by the form below, because it is the one
+// the person is designing. This handles the link UPSTREAM of it: same four
+// questions, same functions, a separate set of inputs — and it returns what
+// the link passes DOWN (its Zs and its volts dropped) rather than printing
+// a verdict of its own.
+//
+// It takes ONE object rather than eleven arguments. Eleven positional
+// arguments is eleven chances to put two of them the wrong way round, which is
+// the mistake that has cost the most time on this project.
+function evaluateSubmainLink(link) {
+  const voltage = getSupplyVoltage(link.supply);
+  const drop = calculateRunVoltageDrop(
+    link.material, link.supply, link.length, link.current, link.csa, voltage);
+
+  // The submain's own device. Derived from its design current unless typed,
+  // exactly as the final circuit's is.
+  const deviceRating = link.deviceRating;
+
+  if (deviceRating === null) {
+    throw new Error(
+      "Submain design current " + link.current +
+      " A is above the largest device rating this tool covers (125 A)");
+  }
+
+  const capacityColumn = getCapacityColumn(link.material, link.method, link.supply);
+  const minimumCsa = findSmallestCsaForCapacity(
+    link.material, deviceRating, link.correctionTotal, link.supply, link.method);
+
+  const loop = calculateZs(
+    link.material, link.cpcMaterial, link.csa, link.cpcSize, link.length,
+    link.ze, link.curve, deviceRating);
+
+  const heat = evaluateAdiabatic(
+    loop.zs, link.disconnectTime, link.cpcType, link.cpcSize);
+
+  return {
+    voltage: voltage,
+    voltsDropped: drop.volts,
+    percent: drop.percent,
+    deviceRating: deviceRating,
+    minimumCsa: minimumCsa,
+    tabulatedCapacity: capacityColumn[link.csa],
+    capacityPasses: minimumCsa !== null && link.csa >= minimumCsa,
+    zs: loop.zs,
+    maxZs: loop.maxZs,
+    zsPasses: loop.passes,
+    requiredCpcCsa: heat.requiredCsa,
+    adiabaticPasses: heat.passes
+  };
+}
+
+// The volt drop of a CHAIN, in volts and then as a percentage.
+//
+// Percentages cannot be added. A 415 V submain dropping 2% loses 8.3 V; a
+// 230 V final circuit dropping 3% loses 6.9 V; the total is 15.2 V, which
+// against the 230 V at the socket is 6.6% — a FAIL, where 2 + 3 = 5% says it
+// passes exactly. The naive sum flatters the design by a fifth.
+//
+// So: sum the VOLTS along the chain, then take one percentage, of the voltage
+// at the point of utilisation — which is what Reg 525.1 asks for. Volts are
+// the physical quantity; a percentage is only ever a percentage OF something.
+function evaluateChainVoltDrop(voltsDroppedPerLink, pointOfUtilisationVolts, limitPercent) {
+  if (!(pointOfUtilisationVolts > 0)) {
+    throw new Error(
+      "Voltage at the point of utilisation must be above zero, got " +
+      pointOfUtilisationVolts);
+  }
+  if (voltsDroppedPerLink.length === 0) {
+    throw new Error("A chain needs at least one link");
+  }
+
+  let totalVolts = 0;
+
+  for (const volts of voltsDroppedPerLink) {
+    if (!(volts >= 0)) {
+      throw new Error("A link dropped " + volts + " V — not a usable figure");
+    }
+    totalVolts += volts;
+  }
+
+  const percent = calculateDropPercent(totalVolts, pointOfUtilisationVolts);
+
+  return {
+    totalVolts: totalVolts,
+    percentAtPoint: percent,
+    limitPercent: limitPercent,
+    passes: percent <= limitPercent,
+    // Carried so the note can say "across 2 links" rather than making the
+    // reader count them.
+    linkCount: voltsDroppedPerLink.length
+  };
+}
 
 // The prospective earth fault current, in amperes: I = U0 ÷ Zs.
 //
@@ -1982,6 +2089,7 @@ form.addEventListener("submit", function (event) {
   const cpcText = document.getElementById("cpc").value;
   const cpcMaterial = document.getElementById("cpc-material").value;
   const cpcType = document.getElementById("cpc-type").value;
+  const submainActive = document.getElementById("submain-active").value;
   const timeText = document.getElementById("disconnect-time").value;
 
   // Check every field before calculating anything. Stop at the first problem
@@ -2110,6 +2218,84 @@ form.addEventListener("submit", function (event) {
   // quoted to the person is always the number the tool actually used.
   const factors = readCorrectionFactors();
 
+  // --- the submain, when there is one ---------------------------------
+  // Evaluated FIRST, because what it passes down — its Zs and its volts —
+  // are inputs to the final circuit below. One set of conditions (Ca, Cg,
+  // Ci, Cf) serves both links; see the comment in index.html.
+  let submain = null;
+  let submainNote = "";
+
+  // The submain is a link in its own right: it can be undersized, or fail its
+  // own Zs, while the final circuit is perfect. Its failures belong in the
+  // verdict, not only in the note. Declared HERE, beside the block that fills
+  // it — a `let` cannot be read before its own declaration line has run.
+  let submainResult = "not checked";
+
+  if (submainActive === "yes") {
+    const submainSupply = document.getElementById("submain-supply").value;
+    const submainLength = Number(document.getElementById("submain-length").value);
+    const submainCurrent = Number(document.getElementById("submain-current").value);
+    const submainCsa = Number(document.getElementById("submain-csa").value);
+    const submainMaterial = document.getElementById("submain-material").value;
+    const submainMethod = getArrangement(
+      document.getElementById("submain-installation").value).method;
+    const submainCurve = document.getElementById("submain-curve").value;
+    const submainCpcSize = Number(document.getElementById("submain-cpc").value);
+    const submainCpcMaterial = document.getElementById("submain-cpc-material").value;
+    const submainCpcType = document.getElementById("submain-cpc-type").value;
+    const submainRatingText = document.getElementById("submain-device-rating").value;
+
+    let submainRating = selectDeviceRating(submainCurrent);
+
+    if (submainRatingText.trim() !== "") {
+      submainRating = Number(submainRatingText);
+    }
+
+    const originSystem = getEarthingSystem(earthing);
+    let originZe = originSystem.typicalZe;
+
+    if (zeText.trim() !== "") {
+      originZe = Number(zeText);
+    }
+
+    submain = evaluateSubmainLink({
+      supply: submainSupply, length: submainLength, current: submainCurrent,
+      csa: submainCsa, material: submainMaterial, method: submainMethod,
+      curve: submainCurve, cpcSize: submainCpcSize,
+      cpcMaterial: submainCpcMaterial, cpcType: submainCpcType,
+      deviceRating: submainRating, correctionTotal: factors.total,
+      ze: originZe,
+      disconnectTime: timeText.trim() === ""
+        ? ADIABATIC_TIME_DEFAULT_S : Number(timeText)
+    });
+
+    const submainFailures = [];
+
+    if (submain.capacityPasses === false) {
+      submainFailures.push("capacity");
+    }
+    if (submain.zsPasses === false) {
+      submainFailures.push("Zs");
+    }
+    if (submain.adiabaticPasses === false) {
+      submainFailures.push("adiabatic");
+    }
+    submainResult = submainFailures.length === 0
+      ? "PASS" : submainFailures.join(" and ");
+
+    submainNote =
+      ` Submain: ${submainLength} m of ${submainCsa} mm² ${submainMaterial}, ` +
+      `${submainRating} A Type ${submainCurve} — ` +
+      `capacity ${submain.capacityPasses ? "PASS" : "FAIL"} ` +
+      `(minimum ${submain.minimumCsa} mm²), ` +
+      `drop ${submain.voltsDropped.toFixed(2)} V, ` +
+      `Zs ${submain.zs.toFixed(3)} Ω against ${submain.maxZs.toFixed(2)} Ω ` +
+      `${submain.zsPasses ? "PASS" : "FAIL"}, CPC needs ` +
+      `${submain.requiredCpcCsa.toFixed(2)} mm² ` +
+      `${submain.adiabaticPasses ? "PASS" : "FAIL"}. ` +
+      `Its Zs is this circuit's Ze.`;
+  }
+
   // A BS 3036 fuse is not on the BS EN 60898 ladder, so a derived rating here
   // would be a made-up number wearing a real one's clothes. This tool does not
   // hold the BS 3036 ratings yet, so it asks instead of guessing.
@@ -2131,6 +2317,10 @@ form.addEventListener("submit", function (event) {
   // Same rule again. Adiabatic can only be judged where Zs was judged, because
   // the fault current comes from Zs.
   let adiabaticResult = "not checked";
+
+  // The chain total is a FIFTH question, asked only when there is a chain.
+  let chainResult = "not checked";
+
 
   if (deviceRating === null) {
     // Ib is past the end of the device ladder this tool knows.
@@ -2238,6 +2428,13 @@ form.addEventListener("submit", function (event) {
         zeSource = "measured";
       }
 
+      // A submain stands between the origin and this circuit, so the Ze HERE
+      // is the submain's Zs, not the supply's Ze.
+      if (submain !== null) {
+        ze = submain.zs;
+        zeSource = "the submain's Zs";
+      }
+
       const loop = calculateZs(
         material, cpcMaterial, csa, cpcSize, length, ze, curve, deviceRating);
 
@@ -2278,6 +2475,23 @@ form.addEventListener("submit", function (event) {
         `That CPC withstands I²t up to ` +
         `${heat.letThroughLimit.toFixed(0)} A²s; a device let-through figure ` +
         `below that clears it.`;
+    }
+
+    // --- the chain total ------------------------------------------------
+    // In VOLTS, then one percentage of the voltage at the point of
+    // utilisation. Adding the two percentages would understate it.
+    if (submain !== null) {
+      const chain = evaluateChainVoltDrop(
+        [submain.voltsDropped, volts], voltage, limit);
+
+      chainResult = chain.passes ? "PASS" : "FAIL";
+
+      note += submainNote +
+        ` Chain volt drop: ${submain.voltsDropped.toFixed(2)} V + ` +
+        `${volts.toFixed(2)} V = ${chain.totalVolts.toFixed(2)} V across ` +
+        `${chain.linkCount} links → ${chain.percentAtPoint.toFixed(2)}% of the ` +
+        `${voltage} V at the point of utilisation, limit ` +
+        `${chain.limitPercent.toFixed(1)}% — ${chainResult}.`;
     }
     sizingNote.textContent = note;
   }
@@ -2320,7 +2534,7 @@ form.addEventListener("submit", function (event) {
 
   // ONE verdict for the row, from BOTH checks. Before this, the row showed
   // the volt drop verdict alone — PASS on runs the capacity check had failed.
-  const verdict = combineVerdicts(result, capacityResult, zsResult, adiabaticResult);
+  const verdict = combineVerdicts(result, capacityResult, zsResult, adiabaticResult, chainResult, submainResult);
   const resultsBody = document.getElementById("results");
   resultsBody.innerHTML =
     `<tr><td>Your run — ${length} m, ${current} A, ${csa} mm²</td>` +

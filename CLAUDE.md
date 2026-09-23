@@ -111,6 +111,11 @@ Neither ever guesses a default, and neither ever calculates anyway.
   FAIL (capacity, volt drop). Where capacity was never checked (Ib above the
   125 A ladder) the row says so — "PASS (volt drop only — capacity not
   checked)" — rather than claiming a full PASS.
+- Percentages are never added. A percentage is a percentage OF something, and
+  two links of a chain have different somethings. Sum the VOLTS, then take one
+  percentage of the voltage at the point of utilisation (Reg 525.1).
+- A chain is checked at BOTH levels: every link on its own terms, and the
+  chain as a whole. The verdict names which link failed, not just which check.
 - FOUR questions, four answers, one verdict: will the cable overheat
   (capacity), will the volts hold up (volt drop), will a fault disconnect the
   device (Zs), will the CPC survive while it does (adiabatic). A circuit can
@@ -382,6 +387,47 @@ table and it says 60, 160 and 51. The check was wrong, not the book — armour
 assumes different properties from a steel conductor. A cross-check that
 disagrees means one of the two is wrong, and it is not always the data.)
 
+### Cascading runs — added 23 Sep 2026
+
+Origin → submain → final circuit. Two things flow along the chain:
+
+- **Ze.** The origin's Ze feeds the submain; the submain's Zs becomes the
+  final circuit's Ze. One line in the handler, and the note says
+  "(the submain's Zs)" rather than printing a number with no provenance.
+- **Volts dropped.** Summed along the chain, then ONE percentage of the
+  voltage at the point of utilisation.
+
+**Why volts and not percentages.** A 415 V submain dropping 2% loses 8.3 V; a
+230 V final circuit dropping 3% loses 6.9 V. Added as percentages: 5%, exactly
+at the limit, pass. Added as volts: 15.2 V, which against the 230 V at the
+socket is 6.61% — a third over the limit. The naive sum flatters the design in
+the unsafe direction, and it flatters it most when the two links run at
+different voltages, which is the normal case for a submain.
+
+**Both levels are judged.** Each link gets the same four checks from the same
+functions — nothing is re-implemented for the submain — and the chain total is
+a fifth. The verdict names the level: FAIL (chain volt drop, submain capacity)
+says the total is over AND the submain is undersized, while the final circuit
+itself is fine.
+
+That second half was a defect caught by a test during the build, on 23 Sep: the
+submain's own failures appeared in the note and never reached the verdict. Same
+shape as the volt-drop-only verdict of 19 Sep. Two parts each telling the truth
+about their own question, with nothing making them agree — this project's
+recurring failure, now caught in minutes rather than by reading a result.
+
+**Deliberate simplifications, stated rather than hidden:**
+
+- ONE set of installation conditions (Ca, Cg, Ci, Cf) serves both links. A real
+  submain often runs hotter or in a different group; a second set of selects
+  would nearly double the form.
+- No discrimination check. Whether the final circuit's device clears before the
+  submain's needs manufacturer time/current curves and let-through energy,
+  which this tool does not hold.
+- Two links only. The data model takes a list of links and the volt drop
+  function takes an array, so a third link is a page change, not a maths
+  change.
+
 ## Limits
 
 | Circuit type | Limit |
@@ -477,10 +523,9 @@ does not know:
   load-time guard.
 - Lead-sheathed cable (k = 26) is NOT held: the source gave no temperature
   pair to check it against, and it is not a cable used here.
-- Calculates ONE run in isolation; cannot chain a submain to a final circuit.
-  "Mixed" applies the 3% lighting limit to the whole run, which is
-  conservative — the real requirement is total drop from origin to the point
-  of utilisation, budgeted across the chain.
+- Chains TWO links only (origin → submain → final circuit), with one set of
+  installation conditions shared by both, and no discrimination check between
+  the two devices. See The method.
 - No XLPE (90 °C thermosetting). Its Ca column is parked in Domain notes.
 - USD pricing is indicative: a public mid-market rate plus the user's own FX
   allowance, not a bank quotation.
@@ -488,11 +533,14 @@ does not know:
 **A PASS is not a compliant design. It is an arithmetic result against the
 conditions you declared.**
 
-## Still to build — in the order chosen 17 Sep 2026
+## Still to build
 
-1. Cascading runs (origin → submain → final circuit). A data-model change,
-   not a table: the tool would hold a chain of runs and budget the total drop
-   across them.
+Nothing from the original list. Everything chosen on 17 Sep 2026 is built.
+
+Candidates when work resumes, in no fixed order: XLPE (the Ca column is parked
+in Domain notes and needs a matching capacity table); the TT earth electrode
+and RCD rule; discrimination between devices in a chain; a third link in a
+chain; BS 3036 and BS 88 fuse curves; armoured (SWA) cable tables.
 
 Done and struck off: current-carrying capacity (16 Sep), correction factors
 Ca/Cg/Ci/Cf (17 Sep), tabulated mV/A/m cross-check (17 Sep), capacity column by
@@ -501,15 +549,17 @@ and guards, CONDUCTORS registry, material select and 16 mm² refusal (19 Sep),
 combined capacity + volt drop verdict (19 Sep), earth fault loop impedance —
 computed Zs limits, 20 °C resistance table, TN-S/TN-C-S, Type B/C/D, TT and
 BS 3036 refusals (21 Sep), adiabatic CPC check — CPC_TYPES registry, k
-recomputed from physics, t as an input (21 Sep).
+recomputed from physics, t as an input (21 Sep), cascading runs — chain volt
+drop in volts, Ze carried forward, submain judged on its own terms (23 Sep).
 
 Retired 21 Sep 2026: the six copper-only guard functions. One loop over
 CONDUCTORS now runs the general guards over every metal, which gave copper two
 checks it never had — the ρ window on its three-phase column, and coverage
 driven by its own size list. 174 lines out, 40 in.
 
-Small job outstanding: a hand-worked verified case for Zs and the adiabatic
-check, ideally from a real job.
+Small job outstanding: a hand-worked verified case for Zs, the adiabatic check
+and a chain, ideally from a real job — every number in those three has been
+checked by this tool against data supplied to it, never against a meter.
 
 ## Naming — resolved 14 Sep 2026
 

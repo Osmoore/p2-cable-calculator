@@ -150,6 +150,90 @@
             <label>Disconnection time (s, optional — 0.1 assumed)
                 <input type="text" id="disconnect-time"></label>
 
+            <!-- ===== The submain, when this run is fed from one =====
+                 Origin → submain → final circuit. The submain has its own
+                 cable, its own device and its own CPC, and it is checked on
+                 its own terms; what it passes DOWN is its Zs (which becomes
+                 the final circuit's Ze) and its volts dropped (which add to
+                 the final circuit's, in volts).
+
+                 The ambient, grouping and insulation selects below are SHARED
+                 by both links. A real submain often runs in different
+                 conditions; giving it a second set of those selects would
+                 nearly double this form. Stated, not hidden. -->
+            <label>Fed from a submain?
+                <select id="submain-active">
+                    <option value="no">No — this run is fed from the origin</option>
+                    <option value="yes">Yes — origin → submain → this run</option>
+                </select>
+            </label>
+
+            <fieldset id="submain-fields">
+                <legend>Submain (ignored unless "Yes" above)</legend>
+
+                <label>Submain supply
+                    <select id="submain-supply">
+                        <option value="three">Three phase 415 V</option>
+                        <option value="single">Single phase 230 V</option>
+                    </select>
+                </label>
+
+                <label>Submain length (m) <input type="text" id="submain-length" value="40"></label>
+                <label>Submain design current (A) <input type="text" id="submain-current" value="80"></label>
+                <label>Submain CSA (mm²) <input type="text" id="submain-csa" value="25"></label>
+
+                <label>Submain conductor
+                    <select id="submain-material">
+                        <option value="copper">Copper</option>
+                        <option value="aluminium">Aluminium</option>
+                    </select>
+                </label>
+
+                <label>Submain installation arrangement
+                    <select id="submain-installation">
+                        <option value="A">Method A — conduit in an insulating wall</option>
+                        <option value="B">Method B — conduit on a wall or in trunking</option>
+                        <option value="C" selected>Method C — clipped direct</option>
+                        <option value="E_touching">Method E — tray, touching</option>
+                        <option value="E_spaced_h">Method E — tray, spaced horizontally</option>
+                        <option value="E_spaced_v">Method E — tray, spaced vertically</option>
+                    </select>
+                </label>
+
+                <label>Submain device rating (A, optional) <input type="text" id="submain-device-rating"></label>
+
+                <label>Submain device curve
+                    <select id="submain-curve">
+                        <option value="B">Type B — Ia 5 x In</option>
+                        <option value="C">Type C — Ia 10 x In</option>
+                        <option value="D">Type D — Ia 20 x In</option>
+                    </select>
+                </label>
+
+                <label>Submain CPC size (mm²) <input type="text" id="submain-cpc" value="16"></label>
+
+                <label>Submain CPC metal
+                    <select id="submain-cpc-material">
+                        <option value="copper">Copper</option>
+                        <option value="aluminium">Aluminium</option>
+                    </select>
+                </label>
+
+                <label>Submain CPC type
+                    <select id="submain-cpc-type">
+                        <option value="in_cable_pvc_cu">Copper CPC in a 70 °C PVC cable</option>
+                        <option value="in_cable_xlpe_cu">Copper CPC in a 90 °C thermosetting cable</option>
+                        <option value="in_cable_pvc_al">Aluminium CPC in a 70 °C PVC cable</option>
+                        <option value="in_cable_xlpe_al">Aluminium CPC in a 90 °C thermosetting cable</option>
+                        <option value="separate_pvc_cu">Separate copper CPC, PVC insulated</option>
+                        <option value="separate_xlpe_cu">Separate copper CPC, thermosetting</option>
+                        <option value="separate_bare_cu">Separate copper CPC, bare and visible</option>
+                        <option value="armour_pvc">Steel wire armour, 70 °C PVC cable</option>
+                        <option value="armour_xlpe">Steel wire armour, 90 °C XLPE cable</option>
+                    </select>
+                </label>
+            </fieldset>
+
             <!-- Installation conditions. The capacity table above holds ONE
                  set of conditions: 30 °C ambient, one circuit, no insulation,
                  an MCB. These four selects say how far this run differs from
